@@ -17,7 +17,8 @@ from pathlib import Path
 
 import yaml
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -121,6 +122,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── UI template ──────────────────────────────────────────────
+
+TEMPLATE_DIR = Path(__file__).parent / "templates"
+
 
 # ── Request / Response models ────────────────────────────────────
 
@@ -152,6 +164,13 @@ class HealthResponse(BaseModel):
 
 
 # ── Endpoints ────────────────────────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse)
+async def ui():
+    """Serve the trading agent web UI."""
+    html_path = TEMPLATE_DIR / "agent.html"
+    return HTMLResponse(html_path.read_text())
+
 
 @app.get("/health", response_model=HealthResponse)
 async def health():
