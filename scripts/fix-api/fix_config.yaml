@@ -1,0 +1,42 @@
+# cTrader FIX 4.4 API Configuration
+# AlgoDesk Trading Desk
+
+price_connection:
+  host: live-uk-eqx-01.p.c-trader.com
+  port: 5211
+  sender_comp_id: live4.icmarkets.6003600
+  target_comp_id: cServer
+  sender_sub_id: QUOTE
+
+trade_connection:
+  host: live-uk-eqx-01.p.c-trader.com
+  port: 5212
+  sender_comp_id: live4.icmarkets.6003600
+  target_comp_id: cServer
+  sender_sub_id: TRADE
+
+# Password via FIX_PASSWORD environment variable
+
+# Default symbols to subscribe on startup (cTrader symbol IDs)
+default_symbols:
+  - "1"    # EURUSD
+  - "2"    # GBPUSD
+
+# Heartbeat interval in seconds
+heartbeat_interval: 30
+
+# Reconnect settings
+reconnect_delay: 5.0
+max_reconnect_delay: 60.0
+
+# Pre-trade risk limits
+risk_limits:
+  max_order_size: 10.0        # Max lots per single order
+  max_position_size: 50.0     # Max net lots per symbol
+  max_open_orders: 50         # Max concurrent open orders
+  max_daily_orders: 500       # Max orders per trading day
+
+# REST API server
+api:
+  host: 0.0.0.0
+  port: 5200
