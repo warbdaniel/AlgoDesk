@@ -11,6 +11,9 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from dotenv import load_dotenv
+load_dotenv('/opt/trading-desk/.env')
+
 import yaml
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
