@@ -19,6 +19,7 @@ import uvicorn
 from fix_connector import FIXConnector
 from fix_price_client import FIXPriceClient
 from fix_trade_client import FIXTradeClient, RiskLimits
+from risk_manager import RiskManager, RiskConfig
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,6 +59,25 @@ risk_limits = RiskLimits(
     max_daily_orders=risk_cfg.get("max_daily_orders", 500),
 )
 
+# Advanced risk configuration
+risk_config = RiskConfig(
+    max_order_size=risk_cfg.get("max_order_size", 10.0),
+    min_order_size=risk_cfg.get("min_order_size", 0.01),
+    max_position_size=risk_cfg.get("max_position_size", 50.0),
+    max_open_orders_per_symbol=risk_cfg.get("max_open_orders_per_symbol", 10),
+    max_open_orders=risk_cfg.get("max_open_orders", 50),
+    max_daily_orders=risk_cfg.get("max_daily_orders", 500),
+    max_total_exposure=risk_cfg.get("max_total_exposure", 100.0),
+    max_daily_loss=risk_cfg.get("max_daily_loss", 5000.0),
+    max_drawdown_pct=risk_cfg.get("max_drawdown_pct", 5.0),
+    max_orders_per_minute=risk_cfg.get("max_orders_per_minute", 30),
+    max_orders_per_second=risk_cfg.get("max_orders_per_second", 5),
+    duplicate_window_sec=risk_cfg.get("duplicate_window_sec", 2.0),
+    max_spread_pips=risk_cfg.get("max_spread_pips", 50.0),
+    stale_price_sec=risk_cfg.get("stale_price_sec", 30.0),
+)
+risk_manager = RiskManager(risk_config)
+
 # ── Global clients ───────────────────────────────────────────────
 
 price_connector: FIXConnector | None = None
@@ -94,7 +114,8 @@ def start_connections():
         sender_sub_id="TRADE",
         password=PASSWORD,
     )
-    trade_client = FIXTradeClient(trade_connector, risk_limits)
+    trade_client = FIXTradeClient(trade_connector, risk_limits, risk_manager)
+    trade_client.set_price_feed(price_client)
 
     price_connector.connect()
     trade_connector.connect()
@@ -162,6 +183,9 @@ def health():
         "trade_connected": trade_connector.is_connected if trade_connector else False,
         "trade_logged_in": trade_connector.is_logged_in if trade_connector else False,
         "uptime_seconds": round(time.time() - start_time, 1) if start_time else 0,
+        "kill_switch_active": risk_manager.is_killed,
+        "price_connection_health": price_connector.health.to_dict() if price_connector else None,
+        "trade_connection_health": trade_connector.health.to_dict() if trade_connector else None,
     }
 
 
@@ -266,6 +290,58 @@ def get_account():
     if not trade_client:
         raise HTTPException(503, "Trade client not initialized")
     return trade_client.get_account_summary()
+
+
+# ── Risk management endpoints ────────────────────────────────────
+
+@app.get("/risk/status")
+def get_risk_status():
+    """Current risk manager state: limits, counters, positions, kill switch."""
+    return risk_manager.get_status()
+
+
+@app.get("/risk/violations")
+def get_risk_violations(count: int = 50):
+    """Recent risk check violations (audit trail)."""
+    return {"violations": risk_manager.get_violations(count)}
+
+
+class KillSwitchRequest(BaseModel):
+    reason: str = Field("Manual kill switch", description="Reason for activating kill switch")
+
+
+@app.post("/risk/kill")
+def activate_kill_switch(req: KillSwitchRequest):
+    """Emergency: halt all new order flow immediately."""
+    risk_manager.activate_kill_switch(req.reason)
+    return {"status": "killed", "reason": req.reason}
+
+
+@app.delete("/risk/kill")
+def deactivate_kill_switch():
+    """Re-enable order flow after manual review."""
+    risk_manager.deactivate_kill_switch()
+    return {"status": "active"}
+
+
+class EquityRequest(BaseModel):
+    equity: float = Field(..., gt=0, description="Starting daily equity for drawdown calculation")
+
+
+@app.post("/risk/equity")
+def set_starting_equity(req: EquityRequest):
+    """Set beginning-of-day equity for drawdown % calculations."""
+    risk_manager.set_starting_equity(req.equity)
+    return {"status": "ok", "starting_equity": req.equity}
+
+
+@app.get("/risk/connection-health")
+def get_connection_health():
+    """Detailed connection health metrics for both FIX sessions."""
+    return {
+        "price": price_connector.health.to_dict() if price_connector else None,
+        "trade": trade_connector.health.to_dict() if trade_connector else None,
+    }
 
 
 # ── Entry point ──────────────────────────────────────────────────

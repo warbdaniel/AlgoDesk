@@ -2,7 +2,7 @@
 FIX 4.4 Trade client for cTrader.
 
 Handles new orders (35=D), cancel requests (35=F), execution reports (35=8),
-position/order tracking, and pre-trade risk checks.
+position/order tracking, and pre-trade risk checks via RiskManager.
 """
 
 import time
@@ -16,6 +16,7 @@ from enum import Enum
 import simplefix
 
 from fix_connector import FIXConnector, _get_field, msg_to_dict
+from risk_manager import RiskManager, RiskConfig
 
 logger = logging.getLogger("fix_trade")
 
@@ -114,12 +115,28 @@ class RiskLimits:
 
 
 class FIXTradeClient:
-    """Trade client over FIX 4.4 trade connection."""
+    """Trade client over FIX 4.4 trade connection with integrated risk management."""
 
-    def __init__(self, connector: FIXConnector, risk_limits: RiskLimits | None = None):
+    def __init__(
+        self,
+        connector: FIXConnector,
+        risk_limits: RiskLimits | None = None,
+        risk_manager: RiskManager | None = None,
+    ):
         self.connector = connector
         self.connector.on_message = self._on_message
         self.risk = risk_limits or RiskLimits()
+
+        # Use advanced risk manager if provided, otherwise create one from legacy limits
+        if risk_manager:
+            self.risk_manager = risk_manager
+        else:
+            self.risk_manager = RiskManager(RiskConfig(
+                max_order_size=self.risk.max_order_size,
+                max_position_size=self.risk.max_position_size,
+                max_open_orders=self.risk.max_open_orders,
+                max_daily_orders=self.risk.max_daily_orders,
+            ))
 
         self._orders: dict[str, Order] = {}
         self._positions: dict[str, Position] = {}
@@ -127,38 +144,15 @@ class FIXTradeClient:
         self._daily_order_count = 0
         self._daily_reset_date = ""
         self._callbacks: list = []
+        self._price_feed = None  # Set externally for price-aware risk checks
+
+    def set_price_feed(self, price_client):
+        """Set reference to price client for spread/staleness checks."""
+        self._price_feed = price_client
 
     def on_execution(self, callback):
         """Register execution callback: callback(order_dict)."""
         self._callbacks.append(callback)
-
-    # ── Risk checks ──────────────────────────────────────────────
-
-    def _check_risk(self, symbol: str, side: str, quantity: float, order_type: str) -> str | None:
-        """Return error string if risk check fails, else None."""
-        today = datetime.now(timezone.utc).strftime("%Y%m%d")
-        if today != self._daily_reset_date:
-            self._daily_order_count = 0
-            self._daily_reset_date = today
-
-        if quantity > self.risk.max_order_size:
-            return f"Order size {quantity} exceeds max {self.risk.max_order_size}"
-
-        open_count = sum(1 for o in self._orders.values() if o.status in ("PENDING", "NEW", "PARTIALLY_FILLED"))
-        if open_count >= self.risk.max_open_orders:
-            return f"Open order limit reached ({self.risk.max_open_orders})"
-
-        if self._daily_order_count >= self.risk.max_daily_orders:
-            return f"Daily order limit reached ({self.risk.max_daily_orders})"
-
-        with self._lock:
-            pos = self._positions.get(symbol)
-        if pos:
-            projected = pos.net_qty + (quantity if side == "1" else -quantity)
-            if abs(projected) > self.risk.max_position_size:
-                return f"Position would exceed max {self.risk.max_position_size} lots"
-
-        return None
 
     # ── Order placement ──────────────────────────────────────────
 
@@ -176,9 +170,34 @@ class FIXTradeClient:
         if not self.connector.is_logged_in:
             return {"error": "Not logged in to trade connection"}
 
-        risk_err = self._check_risk(symbol, side, quantity, order_type)
-        if risk_err:
-            return {"error": risk_err}
+        # Gather price context for risk checks
+        current_bid, current_ask, price_update_time = 0.0, 0.0, 0.0
+        if self._price_feed:
+            price_data = self._price_feed.get_price(symbol)
+            if price_data:
+                current_bid = price_data.get("bid", 0.0)
+                current_ask = price_data.get("ask", 0.0)
+                last_update = price_data.get("last_update", "")
+                if last_update:
+                    try:
+                        dt = datetime.fromisoformat(last_update)
+                        price_update_time = dt.timestamp()
+                    except (ValueError, TypeError):
+                        pass
+
+        # Run pre-trade risk checks via RiskManager
+        violation = self.risk_manager.check_order(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            order_type=order_type,
+            price=price,
+            current_bid=current_bid,
+            current_ask=current_ask,
+            price_update_time=price_update_time,
+        )
+        if violation:
+            return {"error": violation.message, "risk_rule": violation.rule}
 
         cl_ord_id = f"ORD_{uuid.uuid4().hex[:12]}"
         msg = self.connector.build_message(b"D")
@@ -198,6 +217,9 @@ class FIXTradeClient:
             msg.append_pair(99, str(stop_price).encode())  # StopPx
 
         self.connector.send_message(msg)
+
+        # Record with risk manager
+        self.risk_manager.record_order_sent(cl_ord_id, symbol, side, quantity)
         self._daily_order_count += 1
 
         order = Order(
@@ -292,6 +314,11 @@ class FIXTradeClient:
             # Update position on fills
             if exec_type in ("F", "1", "2") and last_qty > 0:
                 self._update_position(order.symbol, order.side, last_qty, last_px)
+                self.risk_manager.record_fill(order.symbol, order.side, last_qty, last_px)
+
+            # Notify risk manager when order is terminal
+            if order.status in ("FILLED", "CANCELED", "REJECTED"):
+                self.risk_manager.record_order_closed(order.cl_ord_id, order.symbol)
 
             logger.info(
                 "ExecReport: %s status=%s filled=%.2f@%.5f %s",
@@ -371,4 +398,5 @@ class FIXTradeClient:
                 "max_open_orders": self.risk.max_open_orders,
                 "max_daily_orders": self.risk.max_daily_orders,
             },
+            "risk_status": self.risk_manager.get_status(),
         }

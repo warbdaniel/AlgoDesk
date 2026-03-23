@@ -31,10 +31,31 @@ max_reconnect_delay: 60.0
 
 # Pre-trade risk limits
 risk_limits:
-  max_order_size: 10.0        # Max lots per single order
-  max_position_size: 50.0     # Max net lots per symbol
-  max_open_orders: 50         # Max concurrent open orders
-  max_daily_orders: 500       # Max orders per trading day
+  # Per-order limits
+  max_order_size: 10.0              # Max lots per single order
+  min_order_size: 0.01              # Min lots per single order
+
+  # Per-symbol limits
+  max_position_size: 50.0           # Max net lots per symbol
+  max_open_orders_per_symbol: 10    # Max open orders per symbol
+
+  # Portfolio-level limits
+  max_open_orders: 50               # Max total concurrent open orders
+  max_daily_orders: 500             # Max orders per trading day
+  max_total_exposure: 100.0         # Max total lots across all symbols
+
+  # Drawdown circuit breaker
+  max_daily_loss: 5000.0            # Max daily loss in account currency (triggers kill switch)
+  max_drawdown_pct: 5.0             # Max drawdown as % of starting equity (triggers kill switch)
+
+  # Rate limiting
+  max_orders_per_minute: 30         # Burst limit per minute
+  max_orders_per_second: 5          # Micro-burst limit per second
+
+  # Duplicate / sanity checks
+  duplicate_window_sec: 2.0         # Reject identical orders within this window
+  max_spread_pips: 50.0             # Reject if spread exceeds threshold
+  stale_price_sec: 30.0             # Reject if last price update older than this
 
 # REST API server
 api:
