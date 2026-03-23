@@ -60,6 +60,11 @@ if [[ "$1" != "--no-restart" ]]; then
         log "FIX API changed - restarting..."
         pm2 restart fix-api 2>/dev/null || pm2 start scripts/fix-api/fix_api_server.py --name fix-api --interpreter python3
     fi
+
+    if echo "$CHANGED_FILES" | grep -q "scripts/data-pipeline/"; then
+        log "Data pipeline changed - restarting..."
+        pm2 restart data-pipeline 2>/dev/null || pm2 start scripts/data-pipeline/data_api_server.py --name data-pipeline --interpreter python3
+    fi
 fi
 
 log "Deployment complete! Commit: $NEW_COMMIT"
