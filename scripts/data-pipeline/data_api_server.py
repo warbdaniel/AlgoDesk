@@ -25,6 +25,7 @@ from data_store import MarketDataStore, Tick, Candle, INTERVALS
 from historical_data import HistoricalDataManager
 from feature_engine import FeatureEngine
 from data_bus import DataBus, EventType
+from tick_poller import TickPoller
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,6 +56,7 @@ store: MarketDataStore | None = None
 hist_manager: HistoricalDataManager | None = None
 feature_engine: FeatureEngine | None = None
 bus: DataBus | None = None
+tick_poller: TickPoller | None = None
 start_time: float = 0
 
 # Tick buffer for batched writes
@@ -107,7 +109,7 @@ def on_tick_received(symbol: str, bid: float, ask: float,
 
 
 def start_services():
-    global store, hist_manager, feature_engine, bus, start_time
+    global store, hist_manager, feature_engine, bus, tick_poller, start_time
     start_time = time.time()
 
     db_path = db_cfg.get("path", str(Path(__file__).parent / "market_data.db"))
@@ -117,6 +119,7 @@ def start_services():
     bus = DataBus(max_history=pipeline_cfg.get("event_history_size", 1000))
 
     # Register default symbols
+    symbol_ids = []
     for sym_cfg in cfg.get("symbols", []):
         store.register_symbol(
             symbol=sym_cfg["id"],
@@ -124,6 +127,7 @@ def start_services():
             pip_size=sym_cfg.get("pip_size", 0.0001),
             digits=sym_cfg.get("digits", 5),
         )
+        symbol_ids.append(sym_cfg["id"])
 
     # Start tick flush thread
     threading.Thread(target=_flush_ticks, daemon=True, name="tick-flusher").start()
@@ -138,10 +142,31 @@ def start_services():
                 store.purge_ticks(cutoff)
     threading.Thread(target=_purge_loop, daemon=True, name="tick-purger").start()
 
+    # Start tick poller if configured
+    fix_cfg = cfg.get("fix_api", {})
+    agg_cfg = cfg.get("auto_aggregate", {})
+    poll_interval = fix_cfg.get("poll_interval", 0)
+    agg_enabled = agg_cfg.get("enabled", False)
+    candle_intervals = agg_cfg.get("intervals", []) if agg_enabled else []
+
+    if poll_interval > 0:
+        tick_poller = TickPoller(
+            fix_api_url=fix_cfg.get("url", "http://localhost:5200"),
+            poll_interval=poll_interval,
+            tick_callback=on_tick_received,
+            symbol_ids=symbol_ids,
+            candle_intervals=candle_intervals,
+            store=store,
+        )
+        tick_poller.start()
+
     logger.info("Data pipeline services started (db=%s)", db_path)
 
 
 def stop_services():
+    # Stop tick poller
+    if tick_poller:
+        tick_poller.stop()
     # Flush remaining ticks
     with _tick_lock:
         if store and _tick_buffer:

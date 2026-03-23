@@ -20,6 +20,58 @@ symbols:
     description: GBPUSD
     pip_size: 0.0001
     digits: 5
+  - id: "3"
+    description: USDJPY
+    pip_size: 0.01
+    digits: 3
+  - id: "4"
+    description: USDCHF
+    pip_size: 0.0001
+    digits: 5
+  - id: "5"
+    description: AUDUSD
+    pip_size: 0.0001
+    digits: 5
+  - id: "6"
+    description: USDCAD
+    pip_size: 0.0001
+    digits: 5
+  - id: "7"
+    description: NZDUSD
+    pip_size: 0.0001
+    digits: 5
+  - id: "8"
+    description: EURGBP
+    pip_size: 0.0001
+    digits: 5
+  - id: "9"
+    description: EURJPY
+    pip_size: 0.01
+    digits: 3
+  - id: "10"
+    description: GBPJPY
+    pip_size: 0.01
+    digits: 3
+  - id: "11"
+    description: CHFJPY
+    pip_size: 0.01
+    digits: 3
+  - id: "13"
+    description: CADJPY
+    pip_size: 0.01
+    digits: 3
+  - id: "14"
+    description: NZDJPY
+    pip_size: 0.01
+    digits: 3
+  - id: "41"
+    description: XAUUSD
+    pip_size: 0.1
+    digits: 2
+  - id: "114"
+    description: BTCUSD
+    pip_size: 1.0
+    digits: 2
 
 # Candle aggregation intervals to auto-build from ticks
 auto_aggregate:
@@ -28,12 +80,15 @@ auto_aggregate:
     - "1m"
     - "5m"
     - "15m"
+    - "30m"
     - "1h"
+    - "4h"
+    - "1d"
 
 # Integration with FIX API (port 5200)
 fix_api:
   url: http://localhost:5200
-  poll_interval: 0        # 0 = use callback, >0 = poll prices every N seconds
+  poll_interval: 1.0        # 0 = use callback, >0 = poll prices every N seconds
 
 # Integration with regime detector (port 5000)
 regime_detector:
