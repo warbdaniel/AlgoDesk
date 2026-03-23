@@ -11,15 +11,20 @@ import os
 import sys
 import json
 import time
+import hmac
+import hashlib
+import secrets
 import logging
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import yaml
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 import uvicorn
 
 from claude_agent import TradingAgent, AgentConfig, AgentResult
@@ -54,6 +59,80 @@ SERVICE_URLS = {
     "fix_api": services_cfg.get("fix_api", "http://localhost:5200"),
     "data_pipeline": services_cfg.get("data_pipeline", "http://localhost:5300"),
 }
+
+# ── Auth ─────────────────────────────────────────────────────────
+
+UI_PASSWORD = os.environ.get("CLAUDE_UI_PASSWORD", "")
+SESSION_SECRET = secrets.token_hex(32)  # random per server start
+SESSION_TTL = 24 * 60 * 60  # 24 hours
+SESSION_COOKIE = "algodesk_session"
+
+# Rate limiting: {ip: [timestamps]}
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+LOGIN_RATE_LIMIT = 5       # max attempts
+LOGIN_RATE_WINDOW = 60     # per 60 seconds
+
+
+def _sign_session(issued_at: int) -> str:
+    """Create an HMAC-signed session token: timestamp.signature"""
+    msg = str(issued_at).encode()
+    sig = hmac.new(SESSION_SECRET.encode(), msg, hashlib.sha256).hexdigest()
+    return f"{issued_at}.{sig}"
+
+
+def _verify_session(token: str) -> bool:
+    """Verify session token signature and TTL."""
+    if not token or "." not in token:
+        return False
+    try:
+        issued_str, sig = token.split(".", 1)
+        issued_at = int(issued_str)
+    except (ValueError, TypeError):
+        return False
+    expected = hmac.new(
+        SESSION_SECRET.encode(), issued_str.encode(), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return False
+    return (time.time() - issued_at) < SESSION_TTL
+
+
+def _check_rate_limit(ip: str) -> bool:
+    """Return True if the IP is within rate limits."""
+    now = time.time()
+    attempts = _login_attempts[ip]
+    # Prune old entries
+    _login_attempts[ip] = [t for t in attempts if now - t < LOGIN_RATE_WINDOW]
+    return len(_login_attempts[ip]) < LOGIN_RATE_LIMIT
+
+
+def _is_auth_enabled() -> bool:
+    return bool(UI_PASSWORD)
+
+
+# ── Auth middleware ──────────────────────────────────────────────
+
+PUBLIC_PATHS = {"/", "/health", "/auth/login", "/auth/check"}
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if not _is_auth_enabled():
+            return await call_next(request)
+
+        path = request.url.path
+        if path in PUBLIC_PATHS:
+            return await call_next(request)
+
+        token = request.cookies.get(SESSION_COOKIE, "")
+        if not _verify_session(token):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Not authenticated"},
+            )
+
+        return await call_next(request)
+
 
 # ── Global agent ─────────────────────────────────────────────────
 
@@ -122,6 +201,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(AuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -170,6 +250,55 @@ async def ui():
     """Serve the trading agent web UI."""
     html_path = TEMPLATE_DIR / "agent.html"
     return HTMLResponse(html_path.read_text())
+
+
+class LoginRequest(BaseModel):
+    password: str
+
+
+@app.post("/auth/login")
+async def auth_login(req: LoginRequest, request: Request, response: Response):
+    """Authenticate with password and receive a session cookie."""
+    if not _is_auth_enabled():
+        return {"status": "ok", "message": "Auth disabled"}
+
+    client_ip = request.client.host if request.client else "unknown"
+
+    if not _check_rate_limit(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Try again later.",
+        )
+
+    _login_attempts[client_ip].append(time.time())
+
+    if not hmac.compare_digest(req.password, UI_PASSWORD):
+        raise HTTPException(status_code=401, detail="Invalid password")
+
+    token = _sign_session(int(time.time()))
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        samesite="strict",
+        max_age=SESSION_TTL,
+    )
+    return {"status": "ok"}
+
+
+@app.get("/auth/check")
+async def auth_check(request: Request):
+    """Check if the current session is valid."""
+    if not _is_auth_enabled():
+        return {"authenticated": True, "auth_required": False}
+
+    token = request.cookies.get(SESSION_COOKIE, "")
+    if _verify_session(token):
+        return {"authenticated": True, "auth_required": True}
+    return JSONResponse(
+        status_code=401,
+        content={"authenticated": False, "auth_required": True},
+    )
 
 
 @app.get("/health", response_model=HealthResponse)

@@ -542,6 +542,96 @@
             font-family: inherit;
         }
 
+        /* ── Login screen ───────────────────────────────────── */
+        .login-screen {
+            position: fixed;
+            inset: 0;
+            background: #0a0e17;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .login-screen.hidden { display: none; }
+        .login-card {
+            width: 380px;
+            padding: 40px 36px;
+            background: linear-gradient(135deg, #111827 0%, #151d2e 100%);
+            border: 1px solid #1e2740;
+            border-radius: 16px;
+            text-align: center;
+        }
+        .login-brand {
+            font-size: 28px;
+            font-weight: 700;
+            color: #f0f4f8;
+            margin-bottom: 6px;
+        }
+        .login-brand span { color: #00d4aa; }
+        .login-subtitle {
+            font-size: 13px;
+            color: #506080;
+            margin-bottom: 32px;
+        }
+        .login-field {
+            position: relative;
+            margin-bottom: 16px;
+        }
+        .login-field input {
+            width: 100%;
+            background: #0d1220;
+            border: 1px solid #2a3050;
+            border-radius: 10px;
+            padding: 14px 16px;
+            color: #e0e6ed;
+            font-size: 15px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .login-field input:focus {
+            border-color: #00d4aa;
+        }
+        .login-field input::placeholder {
+            color: #404860;
+        }
+        .login-btn {
+            width: 100%;
+            background: #00d4aa;
+            color: #0a0e17;
+            border: none;
+            padding: 14px;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+            font-family: inherit;
+        }
+        .login-btn:hover { background: #00e6b8; }
+        .login-btn:disabled {
+            background: #1e2740;
+            color: #506080;
+            cursor: not-allowed;
+        }
+        .login-error {
+            color: #ff4d6a;
+            font-size: 13px;
+            margin-bottom: 14px;
+            min-height: 20px;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-6px); }
+            20%, 40%, 60%, 80% { transform: translateX(6px); }
+        }
+        .login-card.shake {
+            animation: shake 0.5s ease-in-out;
+        }
+
+        .app-container { display: flex; flex-direction: column; height: 100vh; }
+        .app-container.hidden { display: none; }
+
         /* ── Responsive ─────────────────────────────────────── */
         @media (max-width: 860px) {
             .sidebar { display: none; }
@@ -549,6 +639,22 @@
     </style>
 </head>
 <body>
+    <!-- Login screen -->
+    <div class="login-screen" id="loginScreen">
+        <div class="login-card" id="loginCard">
+            <div class="login-brand">Algo<span>Desk</span></div>
+            <div class="login-subtitle">Trading Agent Console</div>
+            <div class="login-error" id="loginError"></div>
+            <div class="login-field">
+                <input type="password" id="loginPassword" placeholder="Enter password" autocomplete="current-password">
+            </div>
+            <button class="login-btn" id="loginBtn">Sign In</button>
+        </div>
+    </div>
+
+    <!-- App (hidden until authenticated) -->
+    <div class="app-container hidden" id="appContainer">
+
     <!-- Header -->
     <div class="header">
         <div class="header-left">
@@ -639,6 +745,7 @@
             </div>
         </div>
     </div>
+    </div><!-- /app-container -->
 
     <script>
     /* ================================================================
@@ -652,22 +759,94 @@
     let abortController = null;
 
     // ── DOM refs ────────────────────────────────────────────
-    const messagesEl   = document.getElementById('messages');
-    const welcomeEl    = document.getElementById('welcome');
-    const userInput    = document.getElementById('userInput');
-    const sendBtn      = document.getElementById('sendBtn');
-    const clearBtn     = document.getElementById('clearBtn');
-    const statusBadge  = document.getElementById('statusBadge');
-    const statusText   = document.getElementById('statusText');
-    const toolsBtn     = document.getElementById('toolsBtn');
-    const sidebar      = document.getElementById('sidebar');
+    const messagesEl    = document.getElementById('messages');
+    const welcomeEl     = document.getElementById('welcome');
+    const userInput     = document.getElementById('userInput');
+    const sendBtn       = document.getElementById('sendBtn');
+    const clearBtn      = document.getElementById('clearBtn');
+    const statusBadge   = document.getElementById('statusBadge');
+    const statusText    = document.getElementById('statusText');
+    const toolsBtn      = document.getElementById('toolsBtn');
+    const sidebar       = document.getElementById('sidebar');
+    const loginScreen   = document.getElementById('loginScreen');
+    const loginCard     = document.getElementById('loginCard');
+    const loginPassword = document.getElementById('loginPassword');
+    const loginBtn      = document.getElementById('loginBtn');
+    const loginError    = document.getElementById('loginError');
+    const appContainer  = document.getElementById('appContainer');
+
+    // ── Auth ────────────────────────────────────────────────
+    async function checkAuth() {
+        try {
+            const r = await fetch(API_BASE + '/auth/check');
+            const d = await r.json();
+            if (!d.auth_required || d.authenticated) {
+                showApp();
+            } else {
+                showLogin();
+            }
+        } catch {
+            // Server down — show login, they'll see errors later
+            showLogin();
+        }
+    }
+
+    function showApp() {
+        loginScreen.classList.add('hidden');
+        appContainer.classList.remove('hidden');
+        fetchHealth();
+        fetchTools();
+        autoResizeTextarea();
+    }
+
+    function showLogin() {
+        loginScreen.classList.remove('hidden');
+        appContainer.classList.add('hidden');
+        loginPassword.focus();
+    }
+
+    async function handleLogin() {
+        const pw = loginPassword.value;
+        if (!pw) return;
+
+        loginBtn.disabled = true;
+        loginError.textContent = '';
+
+        try {
+            const r = await fetch(API_BASE + '/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pw }),
+            });
+
+            if (r.ok) {
+                showApp();
+            } else {
+                const d = await r.json().catch(() => ({}));
+                loginError.textContent = d.detail || 'Invalid password';
+                loginPassword.value = '';
+                loginPassword.focus();
+                // Shake animation
+                loginCard.classList.remove('shake');
+                void loginCard.offsetWidth; // force reflow
+                loginCard.classList.add('shake');
+            }
+        } catch {
+            loginError.textContent = 'Cannot reach server';
+        } finally {
+            loginBtn.disabled = false;
+        }
+    }
+
+    loginBtn.addEventListener('click', handleLogin);
+    loginPassword.addEventListener('keydown', e => {
+        if (e.key === 'Enter') handleLogin();
+    });
 
     // ── Init ────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
-        fetchHealth();
-        fetchTools();
+        checkAuth();
         setInterval(fetchHealth, 15000);
-        autoResizeTextarea();
     });
 
     // ── Health polling ──────────────────────────────────────
