@@ -1,0 +1,20 @@
+# Layer A - Classical Indicator Thresholds
+# Market Regime Detector Configuration
+
+# ADX thresholds for trend classification
+adx_trend_threshold: 25
+adx_range_threshold: 20
+
+# Bollinger Band Squeeze: BB Width percentile over lookback
+# Below this percentile = compressed/choppy
+bb_squeeze_percentile: 0.20
+
+# Periods to look back for normalized WMA slope direction
+wma_slope_lookback: 3
+
+# ATR volatility expansion threshold (ratio of ATR to ATR SMA)
+# Above 1.0 = expanding, but we use 1.0 as the boundary
+atr_expansion_threshold: 1.0
+
+# Minimum data periods required (must cover all lookbacks)
+min_periods: 150

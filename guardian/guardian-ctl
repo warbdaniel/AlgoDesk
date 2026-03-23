@@ -1,0 +1,322 @@
+#!/opt/trading-desk/venv/bin/python3
+"""
+guardian-ctl - CLI tool for the Trading Desk Guardian
+Usage: guardian-ctl [command]
+"""
+
+import os
+import sys
+import json
+import subprocess
+from datetime import datetime, timedelta
+
+STATE_FILE = '/opt/trading-desk/guardian/state.json'
+CONFIG_FILE = '/opt/trading-desk/guardian/config.yaml'
+GUARDIAN_PY = '/opt/trading-desk/guardian/guardian.py'
+LOG_FILE = '/opt/trading-desk/logs/guardian/guardian.log'
+ALERT_LOG = '/opt/trading-desk/logs/guardian/alerts.log'
+VENV_PYTHON = '/opt/trading-desk/venv/bin/python3'
+SERVICE_NAME = 'trading-guardian'
+
+# Colors
+RED = '\033[91m'
+GREEN = '\033[92m'
+YELLOW = '\033[93m'
+BLUE = '\033[94m'
+CYAN = '\033[96m'
+BOLD = '\033[1m'
+DIM = '\033[2m'
+RESET = '\033[0m'
+
+def color(text, c):
+    return f"{c}{text}{RESET}"
+
+def status_color(status):
+    if status in ('OK', 'HEALTHY', 'running', True):
+        return color(str(status), GREEN)
+    elif status in ('WARNING', 'DEGRADED'):
+        return color(str(status), YELLOW)
+    elif status in ('CRITICAL', 'DOWN', 'EMERGENCY', 'NOT RUNNING', False, 'error', 'timeout'):
+        return color(str(status), RED)
+    return str(status)
+
+def load_state():
+    try:
+        with open(STATE_FILE, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError:
+        return None
+
+def cmd_status():
+    """Show Guardian and system status."""
+    # Check if service is running
+    result = subprocess.run(['systemctl', 'is-active', SERVICE_NAME], capture_output=True, text=True)
+    service_active = result.stdout.strip() == 'active'
+
+    print(f"\n{BOLD}╔══════════════════════════════════════════════════════╗{RESET}")
+    print(f"{BOLD}║         TRADING DESK GUARDIAN - STATUS                ║{RESET}")
+    print(f"{BOLD}╚══════════════════════════════════════════════════════╝{RESET}\n")
+
+    print(f"  Guardian Service:  {status_color('running' if service_active else 'STOPPED')}")
+
+    state = load_state()
+    if not state:
+        print(f"  State:             {color('No state data (Guardian may not have run yet)', YELLOW)}")
+        print()
+        return
+
+    health = state.get('overall_health', {})
+    last_check = state.get('last_check', 'Unknown')
+    check_count = state.get('check_count', 0)
+    uptime_s = state.get('uptime_seconds', 0)
+    uptime_h = uptime_s / 3600
+
+    print(f"  Overall Health:    {status_color(health.get('status', 'UNKNOWN'))}")
+    print(f"  Last Check:        {last_check}")
+    print(f"  Checks Performed:  {check_count}")
+    print(f"  Guardian Uptime:   {uptime_h:.1f} hours")
+
+    if health.get('issues'):
+        print(f"\n  {color('Active Issues:', RED)}")
+        for issue in health['issues']:
+            print(f"    {color('!', RED)} {issue}")
+
+    # System resources
+    results = state.get('last_results', {})
+    sys_data = results.get('system', {})
+
+    if sys_data:
+        print(f"\n  {BOLD}--- System Resources ---{RESET}")
+        cpu = sys_data.get('cpu', {})
+        mem = sys_data.get('memory', {})
+        load = sys_data.get('load', {})
+        uptime = sys_data.get('uptime', {})
+
+        if cpu:
+            bar = _progress_bar(cpu.get('percent', 0), 30)
+            print(f"  CPU:     {bar} {cpu.get('percent', 0):.1f}%  [{status_color(cpu.get('status', 'OK'))}]")
+        if mem:
+            bar = _progress_bar(mem.get('percent', 0), 30)
+            print(f"  Memory:  {bar} {mem.get('percent', 0):.1f}%  ({mem.get('used_gb', 0):.1f}/{mem.get('total_gb', 0):.1f} GB) [{status_color(mem.get('status', 'OK'))}]")
+
+        disk = sys_data.get('disk', {})
+        for path, info in disk.items():
+            if isinstance(info, dict) and 'percent' in info:
+                bar = _progress_bar(info['percent'], 30)
+                print(f"  Disk {path}: {bar} {info['percent']:.1f}%  ({info.get('free_gb', 0):.1f} GB free) [{status_color(info.get('status', 'OK'))}]")
+
+        if load:
+            print(f"  Load:    {load.get('load1', 0):.2f} / {load.get('load5', 0):.2f} / {load.get('load15', 0):.2f}  [{status_color(load.get('status', 'OK'))}]")
+        if uptime:
+            print(f"  Server:  Up {uptime.get('uptime_hours', 0):.1f} hours (since {uptime.get('boot_time', 'unknown')[:19]})")
+
+    # Services
+    svc_data = results.get('services', {})
+    if svc_data:
+        print(f"\n  {BOLD}--- Services ---{RESET}")
+        containers = svc_data.get('docker_containers', {})
+        for name, info in containers.items():
+            print(f"  Docker [{name}]:  {status_color(info.get('status', 'unknown'))}")
+        ports = svc_data.get('ports', {})
+        for name, info in ports.items():
+            listening = info.get('listening', False)
+            print(f"  Port {info.get('port', '?')} ({name}):  {'LISTENING' if listening else color('NOT LISTENING', RED)}")
+        processes = svc_data.get('processes', {})
+        for name, info in processes.items():
+            running = info.get('running', False)
+            req = ' (required)' if info.get('required') else ''
+            print(f"  Process [{name}]{req}:  {status_color(running)}")
+
+    # Network
+    net_data = results.get('network', {})
+    if net_data:
+        print(f"\n  {BOLD}--- Network Security ---{RESET}")
+        unexpected = net_data.get('unexpected_ports', {})
+        if unexpected.get('unexpected'):
+            print(f"  Unexpected Ports:  {color(str(unexpected['unexpected']), YELLOW)}")
+        else:
+            print(f"  Unexpected Ports:  {color('None', GREEN)}")
+        conn = net_data.get('connection_count', {})
+        print(f"  Connections:       {conn.get('established', 0)} established  [{status_color(conn.get('status', 'OK'))}]")
+        susp = net_data.get('suspicious_activity', {})
+        findings = susp.get('findings', [])
+        if findings:
+            for f in findings:
+                print(f"  {color('! SUSPICIOUS:', RED)} {f.get('type', '')} from {f.get('source_ip', 'unknown')}")
+        else:
+            print(f"  Suspicious:        {color('None detected', GREEN)}")
+
+    # File integrity
+    fi_data = results.get('file_integrity', {})
+    if fi_data and fi_data.get('status') != 'SKIPPED':
+        print(f"\n  {BOLD}--- File Integrity ---{RESET}")
+        print(f"  Status:   {status_color(fi_data.get('status', 'OK'))}")
+        print(f"  Files OK: {fi_data.get('ok_count', 0)}  Changed: {fi_data.get('changed_count', 0)}  Missing: {fi_data.get('missing_count', 0)}  New: {fi_data.get('new_count', 0)}")
+
+    print()
+
+def _progress_bar(percent, width=30):
+    filled = int(width * percent / 100)
+    bar = '█' * filled + '░' * (width - filled)
+    if percent > 90:
+        return color(f'[{bar}]', RED)
+    elif percent > 70:
+        return color(f'[{bar}]', YELLOW)
+    return color(f'[{bar}]', GREEN)
+
+def cmd_check():
+    """Run a one-time health check."""
+    print(f"\n{BOLD}Running health check...{RESET}\n")
+    result = subprocess.run(
+        [VENV_PYTHON, GUARDIAN_PY, '--check'],
+        capture_output=True, text=True, cwd='/opt/trading-desk/guardian'
+    )
+    if result.stdout:
+        try:
+            data = json.loads(result.stdout)
+            health = data.get('overall_health', {})
+            print(f"  Result: {status_color(health.get('status', 'UNKNOWN'))}")
+            if health.get('issues'):
+                for issue in health['issues']:
+                    print(f"    {color('!', RED)} {issue}")
+            else:
+                print(f"    {color('All systems nominal', GREEN)}")
+        except json.JSONDecodeError:
+            print(result.stdout)
+    if result.stderr:
+        # Filter out the banner lines from stderr
+        for line in result.stderr.split('\n'):
+            if line.strip() and '═' not in line and '║' not in line and '╔' not in line and '╚' not in line:
+                print(f"  {DIM}{line}{RESET}")
+    print()
+
+def cmd_alerts(n=20):
+    """Show recent alerts."""
+    print(f"\n{BOLD}Recent Alerts (last {n}):{RESET}\n")
+    try:
+        with open(ALERT_LOG, 'r') as f:
+            lines = f.readlines()
+        for line in lines[-n:]:
+            line = line.strip()
+            if '[CRITICAL]' in line or '[EMERGENCY]' in line:
+                print(f"  {color(line, RED)}")
+            elif '[WARNING]' in line:
+                print(f"  {color(line, YELLOW)}")
+            else:
+                print(f"  {line}")
+        if not lines:
+            print(f"  {color('No alerts recorded yet.', GREEN)}")
+    except FileNotFoundError:
+        print(f"  {color('Alert log not found. Guardian may not have run yet.', YELLOW)}")
+    print()
+
+def cmd_logs(n=30):
+    """Show recent guardian logs."""
+    print(f"\n{BOLD}Recent Guardian Logs (last {n}):{RESET}\n")
+    try:
+        result = subprocess.run(['tail', f'-{n}', LOG_FILE], capture_output=True, text=True)
+        if result.stdout:
+            for line in result.stdout.split('\n'):
+                if '[ERROR]' in line or '[CRITICAL]' in line:
+                    print(f"  {color(line, RED)}")
+                elif '[WARNING]' in line:
+                    print(f"  {color(line, YELLOW)}")
+                else:
+                    print(f"  {DIM}{line}{RESET}")
+        else:
+            print(f"  {color('No log entries yet.', YELLOW)}")
+    except Exception as e:
+        print(f"  Error reading logs: {e}")
+    print()
+
+def cmd_start():
+    """Start the Guardian service."""
+    print(f"\n  Starting Guardian service...")
+    result = subprocess.run(['systemctl', 'start', SERVICE_NAME], capture_output=True, text=True)
+    if result.returncode == 0:
+        print(f"  {color('Guardian started successfully!', GREEN)}\n")
+    else:
+        print(f"  {color('Failed to start Guardian:', RED)} {result.stderr}\n")
+
+def cmd_stop():
+    """Stop the Guardian service."""
+    print(f"\n  Stopping Guardian service...")
+    result = subprocess.run(['systemctl', 'stop', SERVICE_NAME], capture_output=True, text=True)
+    if result.returncode == 0:
+        print(f"  {color('Guardian stopped.', YELLOW)}\n")
+    else:
+        print(f"  {color('Failed to stop Guardian:', RED)} {result.stderr}\n")
+
+def cmd_restart():
+    """Restart the Guardian service."""
+    print(f"\n  Restarting Guardian service...")
+    result = subprocess.run(['systemctl', 'restart', SERVICE_NAME], capture_output=True, text=True)
+    if result.returncode == 0:
+        print(f"  {color('Guardian restarted successfully!', GREEN)}\n")
+    else:
+        print(f"  {color('Failed to restart Guardian:', RED)} {result.stderr}\n")
+
+def cmd_reload():
+    """Reload Guardian config without restart."""
+    print(f"\n  Sending reload signal (SIGHUP)...")
+    result = subprocess.run(['systemctl', 'kill', '-s', 'SIGHUP', SERVICE_NAME], capture_output=True, text=True)
+    if result.returncode == 0:
+        print(f"  {color('Configuration reload signal sent!', GREEN)}\n")
+    else:
+        print(f"  {color('Failed to send reload signal:', RED)} {result.stderr}\n")
+
+def cmd_help():
+    print(f"""
+{BOLD}╔══════════════════════════════════════════════════════╗
+║         TRADING DESK GUARDIAN - CLI                   ║
+╚══════════════════════════════════════════════════════╝{RESET}
+
+{BOLD}Usage:{RESET} guardian-ctl <command>
+
+{BOLD}Commands:{RESET}
+  {color('status', CYAN)}     Show full system status dashboard
+  {color('check', CYAN)}      Run a one-time health check now
+  {color('alerts', CYAN)}     Show recent alerts (add number: alerts 50)
+  {color('logs', CYAN)}       Show recent guardian logs (add number: logs 50)
+  {color('start', CYAN)}      Start the Guardian service
+  {color('stop', CYAN)}       Stop the Guardian service
+  {color('restart', CYAN)}    Restart the Guardian service
+  {color('reload', CYAN)}     Reload config without restart (SIGHUP)
+  {color('help', CYAN)}       Show this help message
+""")
+
+def main():
+    if len(sys.argv) < 2:
+        cmd_status()
+        return
+
+    command = sys.argv[1].lower()
+
+    if command == 'status':
+        cmd_status()
+    elif command == 'check':
+        cmd_check()
+    elif command == 'alerts':
+        n = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+        cmd_alerts(n)
+    elif command == 'logs':
+        n = int(sys.argv[2]) if len(sys.argv) > 2 else 30
+        cmd_logs(n)
+    elif command == 'start':
+        cmd_start()
+    elif command == 'stop':
+        cmd_stop()
+    elif command == 'restart':
+        cmd_restart()
+    elif command == 'reload':
+        cmd_reload()
+    elif command == 'help' or command == '--help' or command == '-h':
+        cmd_help()
+    else:
+        print(f"\n  {color(f'Unknown command: {command}', RED)}")
+        cmd_help()
+
+if __name__ == '__main__':
+    main()

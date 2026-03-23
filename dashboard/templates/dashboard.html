@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Desk Analytics</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0a0e17;
+            color: #e0e6ed;
+            min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #0d1321 0%, #1a1f35 100%);
+            border-bottom: 1px solid #2a3050;
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #f0f4f8;
+        }
+        .header h1 span { color: #00d4aa; }
+        .header-right {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        .header-right select {
+            background: #151b2e;
+            color: #c0c8d4;
+            border: 1px solid #2a3050;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        .refresh-btn {
+            background: #00d4aa;
+            color: #0a0e17;
+            border: none;
+            padding: 7px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .refresh-btn:hover { background: #00e6b8; }
+        .last-updated {
+            font-size: 11px;
+            color: #606880;
+        }
+
+        /* KPI Cards */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            padding: 16px 24px;
+        }
+        .kpi-card {
+            background: linear-gradient(135deg, #111827 0%, #151d2e 100%);
+            border: 1px solid #1e2740;
+            border-radius: 10px;
+            padding: 16px;
+            text-align: center;
+        }
+        .kpi-card .label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #606880;
+            margin-bottom: 6px;
+        }
+        .kpi-card .value {
+            font-size: 26px;
+            font-weight: 700;
+        }
+        .kpi-card .sub {
+            font-size: 11px;
+            color: #506080;
+            margin-top: 4px;
+        }
+        .positive { color: #00d4aa; }
+        .negative { color: #ff4d6a; }
+        .neutral { color: #a0aec0; }
+
+        /* Charts */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            padding: 0 24px 12px;
+        }
+        .chart-card {
+            background: #111827;
+            border: 1px solid #1e2740;
+            border-radius: 10px;
+            padding: 16px;
+        }
+        .chart-card.full-width {
+            grid-column: 1 / -1;
+        }
+        .chart-card h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #c0c8d4;
+            margin-bottom: 10px;
+        }
+
+        /* Trade Table */
+        .table-section {
+            padding: 0 24px 24px;
+        }
+        .table-card {
+            background: #111827;
+            border: 1px solid #1e2740;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .table-card h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #c0c8d4;
+            padding: 16px 16px 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        th {
+            background: #0d1321;
+            color: #606880;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid #1e2740;
+            position: sticky;
+            top: 0;
+        }
+        td {
+            padding: 9px 12px;
+            border-bottom: 1px solid #141c2f;
+            color: #c0c8d4;
+        }
+        tr:hover td { background: #151d2e; }
+        .table-scroll {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        .badge-buy { background: #002b22; color: #00d4aa; }
+        .badge-sell { background: #2b0016; color: #ff4d6a; }
+        .badge-regime {
+            background: #1a1f35;
+            color: #7b8ab8;
+            border: 1px solid #2a3050;
+        }
+
+        /* Regime breakdown */
+        .regime-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+            padding: 0 24px 12px;
+        }
+        .regime-card {
+            background: #111827;
+            border: 1px solid #1e2740;
+            border-radius: 10px;
+            padding: 14px;
+        }
+        .regime-card h4 {
+            font-size: 13px;
+            font-weight: 600;
+            color: #7b8ab8;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .regime-stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+            font-size: 12px;
+        }
+        .regime-stat .label { color: #606880; }
+
+        .empty-state {
+            text-align: center;
+            padding: 80px 24px;
+            color: #404860;
+        }
+        .empty-state h2 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #506080;
+        }
+        .empty-state p { font-size: 14px; }
+        .empty-state code {
+            display: block;
+            margin-top: 16px;
+            background: #151b2e;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #00d4aa;
+            text-align: left;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><span>&#9670;</span> Trading Desk <span>Analytics</span></h1>
+        <div class="header-right">
+            <select id="filterSymbol"><option value="">All Symbols</option></select>
+            <select id="filterRegime"><option value="">All Regimes</option></select>
+            <button class="refresh-btn" onclick="loadDashboard()">Refresh</button>
+            <span class="last-updated" id="lastUpdated"></span>
+        </div>
+    </div>
+
+    <div id="dashboardContent"></div>
+
+    <script>
+    const API = '';
+    let autoRefreshTimer;
+
+    async function loadDashboard() {
+        const symbol = document.getElementById('filterSymbol').value;
+        const regime = document.getElementById('filterRegime').value;
+        let params = new URLSearchParams();
+        if (symbol) params.set('symbol', symbol);
+        if (regime) params.set('regime', regime);
+
+        try {
+            const [analyticsRes, tradesRes, filtersRes] = await Promise.all([
+                fetch(`${API}/api/analytics?${params}`),
+                fetch(`${API}/api/trades?${params}&limit=200`),
+                fetch(`${API}/api/filters`)
+            ]);
+            const analytics = await analyticsRes.json();
+            const trades = await tradesRes.json();
+            const filters = await filtersRes.json();
+
+            updateFilters(filters);
+            renderDashboard(analytics, trades);
+            document.getElementById('lastUpdated').textContent =
+                'Updated: ' + new Date().toLocaleTimeString();
+        } catch(e) {
+            console.error('Failed to load dashboard:', e);
+        }
+    }
+
+    function updateFilters(filters) {
+        const symSelect = document.getElementById('filterSymbol');
+        const regSelect = document.getElementById('filterRegime');
+        const symVal = symSelect.value;
+        const regVal = regSelect.value;
+
+        symSelect.innerHTML = '<option value="">All Symbols</option>';
+        filters.symbols.forEach(s => {
+            symSelect.innerHTML += `<option value="${s}" ${s===symVal?'selected':''}>${s}</option>`;
+        });
+        regSelect.innerHTML = '<option value="">All Regimes</option>';
+        filters.regimes.forEach(r => {
+            regSelect.innerHTML += `<option value="${r}" ${r===regVal?'selected':''}>${r}</option>`;
+        });
+    }
+
+    function renderDashboard(analytics, trades) {
+        const o = analytics.overall;
+        const container = document.getElementById('dashboardContent');
+
+        if (o.total_trades === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <h2>No trades recorded yet</h2>
+                    <p>The dashboard will populate once your n8n pipeline logs completed trades.</p>
+                    <code>curl -X POST http://46.225.98.97:5100/api/trades \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "symbol": "EURUSD",
+    "direction": "BUY",
+    "entry_price": 1.0850,
+    "exit_price": 1.0892,
+    "volume": 0.10,
+    "pnl": 42.00,
+    "pnl_pips": 42,
+    "risk_percent": 1.0,
+    "regime": "STRONG_TREND",
+    "confidence": 0.82,
+    "entry_time": "2026-03-20T10:00:00Z",
+    "exit_time": "2026-03-20T14:30:00Z",
+    "duration_seconds": 16200,
+    "signal_source": "gocharting",
+    "reasoning": "Delta confirmed trend"
+  }'</code>
+                </div>`;
+            return;
+        }
+
+        const evClass = o.expected_value > 0 ? 'positive' : o.expected_value < 0 ? 'negative' : 'neutral';
+        const pnlClass = o.net_pnl > 0 ? 'positive' : o.net_pnl < 0 ? 'negative' : 'neutral';
+        const pfClass = (o.profit_factor === '∞' || o.profit_factor > 1) ? 'positive' : 'negative';
+        const srClass = o.sharpe_ratio > 0 ? 'positive' : o.sharpe_ratio < 0 ? 'negative' : 'neutral';
+
+        let html = `
+        <div class="kpi-grid">
+            <div class="kpi-card">
+                <div class="label">Expected Value</div>
+                <div class="value ${evClass}">$${o.expected_value >= 0 ? '+' : ''}${o.expected_value}</div>
+                <div class="sub">per trade</div>
+            </div>
+            <div class="kpi-card">
+                <div class="label">Win Rate</div>
+                <div class="value ${o.win_rate >= 50 ? 'positive' : 'negative'}">${o.win_rate}%</div>
+                <div class="sub">${o.win_count}W / ${o.loss_count}L / ${o.breakeven_count}BE</div>
+            </div>
+            <div class="kpi-card">
+                <div class="label">Avg Win</div>
+                <div class="value positive">$${o.avg_win}</div>
+                <div class="sub">Best: $${o.best_trade}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="label">Avg Loss</div>
+                <div class="value negative">$${o.avg_loss}</div>
+                <div class="sub">Worst: $${o.worst_trade}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="label">Profit Factor</div>
+                <div class="value ${pfClass}">${o.profit_factor}</div>
+                <div class="sub">Gross P: $${o.gross_profit} / L: $${o.gross_loss}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="label">Sharpe Ratio</div>
+                <div class="value ${srClass}">${o.sharpe_ratio}</div>
+                <div class="sub">annualized (√252)</div>
+            </div>
+            <div class="kpi-card">
+                <div class="label">Profit Ratio</div>
+                <div class="value ${o.profit_ratio === '∞' || o.profit_ratio > 1 ? 'positive' : 'negative'}">${o.profit_ratio}:1</div>
+                <div class="sub">reward : risk</div>
+            </div>
+            <div class="kpi-card">
+                <div class="label">Net P&L</div>
+                <div class="value ${pnlClass}">$${o.net_pnl >= 0 ? '+' : ''}${o.net_pnl}</div>
+                <div class="sub">${o.total_trades} trades | DD: $${o.max_drawdown}</div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-card full-width"><h3>Equity Curve</h3><div id="equityChart"></div></div>
+            <div class="chart-card"><h3>Rolling Expected Value (20-trade window)</h3><div id="evChart"></div></div>
+            <div class="chart-card"><h3>P&L Distribution</h3><div id="pnlDistChart"></div></div>
+        </div>`;
+
+        // Regime breakdown
+        const regimeKeys = Object.keys(analytics.by_regime);
+        if (regimeKeys.length > 0) {
+            html += '<div class="regime-grid">';
+            regimeKeys.forEach(r => {
+                const rm = analytics.by_regime[r];
+                const revClass = rm.expected_value > 0 ? 'positive' : rm.expected_value < 0 ? 'negative' : 'neutral';
+                html += `
+                <div class="regime-card">
+                    <h4>${r}</h4>
+                    <div class="regime-stat"><span class="label">Trades</span><span>${rm.total_trades}</span></div>
+                    <div class="regime-stat"><span class="label">Win Rate</span><span>${rm.win_rate}%</span></div>
+                    <div class="regime-stat"><span class="label">EV</span><span class="${revClass}">$${rm.expected_value >= 0 ? '+' : ''}${rm.expected_value}</span></div>
+                    <div class="regime-stat"><span class="label">Profit Factor</span><span>${rm.profit_factor}</span></div>
+                    <div class="regime-stat"><span class="label">Sharpe</span><span>${rm.sharpe_ratio}</span></div>
+                    <div class="regime-stat"><span class="label">Net P&L</span><span class="${rm.net_pnl >= 0 ? 'positive' : 'negative'}">$${rm.net_pnl >= 0 ? '+' : ''}${rm.net_pnl}</span></div>
+                </div>`;
+            });
+            html += '</div>';
+        }
+
+        // Trade table
+        html += `
+        <div class="table-section">
+            <div class="table-card">
+                <h3>Trade Log (${trades.length} most recent)</h3>
+                <div class="table-scroll">
+                    <table>
+                        <thead><tr>
+                            <th>Time</th><th>Symbol</th><th>Dir</th><th>Regime</th>
+                            <th>Entry</th><th>Exit</th><th>Vol</th><th>P&L</th><th>Pips</th><th>Source</th>
+                        </tr></thead>
+                        <tbody>`;
+        trades.forEach(t => {
+            const pClass = t.pnl > 0 ? 'positive' : t.pnl < 0 ? 'negative' : 'neutral';
+            const dirBadge = t.direction === 'BUY' ? 'badge-buy' : 'badge-sell';
+            const entryDate = new Date(t.entry_time).toLocaleString('en-GB', {
+                day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'
+            });
+            html += `<tr>
+                <td>${entryDate}</td>
+                <td><strong>${t.symbol}</strong></td>
+                <td><span class="badge ${dirBadge}">${t.direction}</span></td>
+                <td><span class="badge badge-regime">${t.regime}</span></td>
+                <td>${t.entry_price}</td>
+                <td>${t.exit_price}</td>
+                <td>${t.volume}</td>
+                <td class="${pClass}"><strong>$${t.pnl > 0 ? '+' : ''}${t.pnl.toFixed(2)}</strong></td>
+                <td>${t.pnl_pips}</td>
+                <td>${t.signal_source}</td>
+            </tr>`;
+        });
+        html += '</tbody></table></div></div></div>';
+
+        container.innerHTML = html;
+
+        // Render charts
+        renderEquityChart(o.equity_curve);
+        renderEVChart(o.rolling_ev);
+        renderPnLDistChart(trades);
+    }
+
+    function chartLayout(overrides = {}) {
+        return Object.assign({
+            paper_bgcolor: '#111827',
+            plot_bgcolor: '#111827',
+            font: { color: '#808ca0', size: 11 },
+            margin: { t: 10, b: 40, l: 50, r: 20 },
+            xaxis: { gridcolor: '#1e2740', zerolinecolor: '#2a3050' },
+            yaxis: { gridcolor: '#1e2740', zerolinecolor: '#2a3050' },
+            height: 260,
+        }, overrides);
+    }
+
+    function renderEquityChart(equity) {
+        Plotly.newPlot('equityChart', [{
+            y: equity,
+            type: 'scatter',
+            mode: 'lines',
+            fill: 'tozeroy',
+            line: { color: '#00d4aa', width: 2 },
+            fillcolor: 'rgba(0,212,170,0.08)',
+            name: 'Equity'
+        }], chartLayout({
+            height: 300,
+            yaxis: { gridcolor: '#1e2740', zerolinecolor: '#ff4d6a', zerolinewidth: 1, title: 'Cumulative P&L ($)' },
+            xaxis: { gridcolor: '#1e2740', title: 'Trade #' }
+        }), { responsive: true, displayModeBar: false });
+    }
+
+    function renderEVChart(evs) {
+        const colors = evs.map(v => v >= 0 ? '#00d4aa' : '#ff4d6a');
+        Plotly.newPlot('evChart', [{
+            y: evs,
+            type: 'bar',
+            marker: { color: colors },
+            name: 'Rolling EV'
+        }], chartLayout({
+            yaxis: { gridcolor: '#1e2740', zerolinecolor: '#ff4d6a', zerolinewidth: 1, title: 'EV ($)' },
+            xaxis: { gridcolor: '#1e2740', title: 'Trade #' }
+        }), { responsive: true, displayModeBar: false });
+    }
+
+    function renderPnLDistChart(trades) {
+        const pnls = trades.map(t => t.pnl);
+        Plotly.newPlot('pnlDistChart', [{
+            x: pnls,
+            type: 'histogram',
+            marker: { color: '#4a7dff', line: { color: '#2a5acc', width: 1 } },
+            nbinsx: 20,
+            name: 'P&L'
+        }], chartLayout({
+            xaxis: { gridcolor: '#1e2740', title: 'P&L ($)' },
+            yaxis: { gridcolor: '#1e2740', title: 'Frequency' }
+        }), { responsive: true, displayModeBar: false });
+    }
+
+    // Filter change listeners
+    document.getElementById('filterSymbol').addEventListener('change', loadDashboard);
+    document.getElementById('filterRegime').addEventListener('change', loadDashboard);
+
+    // Initial load + auto-refresh every 30s
+    loadDashboard();
+    autoRefreshTimer = setInterval(loadDashboard, 30000);
+    </script>
+</body>
+</html>

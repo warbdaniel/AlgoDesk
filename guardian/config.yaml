@@ -1,0 +1,131 @@
+# ============================================================
+#  TRADING DESK GUARDIAN - Configuration
+#  Watches over your algo trading infrastructure
+# ============================================================
+
+general:
+  check_interval: 30          # seconds between health checks
+  log_file: /opt/trading-desk/logs/guardian/guardian.log
+  alert_log: /opt/trading-desk/logs/guardian/alerts.log
+  state_file: /opt/trading-desk/guardian/state.json
+  max_log_size_mb: 50         # rotate logs after this size
+  log_backup_count: 5         # keep this many rotated logs
+
+# --- System Resource Thresholds ---
+resources:
+  cpu:
+    warning_percent: 80
+    critical_percent: 95
+    sustained_seconds: 60     # alert only if sustained
+  memory:
+    warning_percent: 80
+    critical_percent: 95
+  disk:
+    warning_percent: 80
+    critical_percent: 90
+    check_paths:
+      - /
+      - /opt/trading-desk
+  swap:
+    warning_percent: 50       # swap usage is bad for trading latency
+    critical_percent: 80
+  load_average:
+    warning_multiplier: 2.0   # multiplier of CPU count
+    critical_multiplier: 4.0
+
+# --- Services to Monitor ---
+services:
+  docker_containers:
+    - name: n8n
+      restart_on_failure: true
+      max_restarts: 3
+      restart_cooldown: 300   # seconds between restart attempts
+
+  ports:
+    - port: 5678
+      name: "n8n webhook"
+      protocol: tcp
+    - port: 5000
+      name: "regime-detector API"
+      protocol: tcp
+    - port: 22
+      name: "SSH"
+      protocol: tcp
+    - port: 5100
+      name: "analytics-dashboard"
+      protocol: tcp
+
+  processes:
+    - name: "dockerd"
+      required: true
+    - name: "sshd"
+      required: true
+
+# --- Network Security ---
+network:
+  # Ports that SHOULD be listening (allowlist)
+  expected_listening_ports: [22, 53, 5000, 5100, 5678]
+  # Alert on unexpected outbound connections
+  monitor_outbound: true
+  # Max connections before warning
+  max_connections_warning: 500
+  max_connections_critical: 1000
+  # Monitor for port scan patterns
+  detect_port_scans: true
+  port_scan_threshold: 20    # connections from same IP in 60s
+
+# --- File Integrity Monitoring ---
+file_integrity:
+  check_interval: 300         # seconds (5 min)
+  watch_files:
+    - /opt/trading-desk/ctrader-mcp-server/.env
+    - /opt/trading-desk/ctrader-mcp-server/server.py
+    - /opt/trading-desk/ctrader-mcp-server/ctrader_bot.py
+    - /opt/trading-desk/scripts/regime-detector/config.yaml
+    - /opt/trading-desk/scripts/regime-detector/regime_detector.py
+    - /etc/ssh/sshd_config
+    - /opt/trading-desk/dashboard/dashboard.py
+  watch_directories:
+    - path: /opt/trading-desk/configs/
+      recursive: false
+
+# --- Log Monitoring ---
+log_monitoring:
+  watch_files:
+    - path: /opt/trading-desk/logs/system/
+      patterns:
+        - "ERROR"
+        - "CRITICAL"
+        - "Exception"
+        - "Traceback"
+        - "Connection refused"
+        - "Out of memory"
+    - path: /var/log/auth.log
+      patterns:
+        - "Failed password"
+        - "Invalid user"
+        - "authentication failure"
+  # Alert after this many matching lines in 5 min
+  alert_threshold: 10
+  failed_login_threshold: 5   # brute force detection
+
+# --- Recovery Actions ---
+recovery:
+  auto_restart_services: true
+  auto_clear_tmp: false       # dangerous, keep off
+  auto_kill_runaway: false    # kill processes using >90% CPU for 5min
+  runaway_cpu_threshold: 95
+  runaway_duration: 300
+
+# --- Alerting ---
+alerting:
+  # Console/log alerting is always on
+  # Future: add webhook, email, telegram etc
+  severity_levels:
+    - INFO
+    - WARNING  
+    - CRITICAL
+    - EMERGENCY
+  rate_limit: 60              # min seconds between same alert
+  daily_summary: true
+  summary_hour: 8             # 8 AM UTC

@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+*.egg-info/
+dist/
+build/
+
+# Environment and secrets
+.env
+*.env
+.env.*
+ctrader-mcp-server/.env
+
+# Data files (too large for git)
+data/historical/
+data/live/
+data/hmm-models/
+chromadb-data/
+n8n-data/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node modules
+node_modules/
+
+# PM2
+.pm2/
+
+# Guardian state (runtime)
+guardian/state.json
+
+# Backtest results (regeneratable)
+backtest/results/
+
+# IDE
+.vscode/
+.idea/
