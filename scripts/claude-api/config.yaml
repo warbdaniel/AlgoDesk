@@ -1,0 +1,25 @@
+# AlgoDesk Claude API Agent Configuration
+# Autonomous trading agent powered by Claude
+
+server:
+  port: 5400
+  host: "0.0.0.0"
+
+claude:
+  model: "claude-opus-4-6"
+  max_tokens: 16000
+  max_tool_rounds: 20            # max agentic loop iterations per query
+
+# Internal service endpoints
+services:
+  regime_detector: "http://localhost:5000"
+  dashboard: "http://localhost:5100"
+  fix_api: "http://localhost:5200"
+  data_pipeline: "http://localhost:5300"
+
+# Agent behaviour
+agent:
+  system_prompt_file: null       # override with a file path for custom prompt
+  default_symbols: ["1", "2"]    # cTrader symbol IDs
+  require_confirmation: true     # require user confirmation before placing orders
+  read_only: false               # when true, disables all order/risk-modifying tools
