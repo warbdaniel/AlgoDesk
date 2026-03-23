@@ -17,6 +17,7 @@ scripts/data-pipeline/     → Data Infrastructure (FastAPI on port 5300)
 dashboard/                 → Analytics Dashboard (FastAPI on port 5100)
 guardian/                  → Trading Desk Guardian (systemd daemon)
 ctrader-mcp-server/       → cTrader MCP Server (14 tools)
+scripts/alpha-engine/     → Project Alpha ML Scalping Engine (data foundation)
 scripts/utils/            → Utility scripts (deploy.sh)
 ```
 
@@ -46,6 +47,12 @@ scripts/utils/            → Utility scripts (deploy.sh)
 - `guardian/guardian.py` - Server monitoring daemon
 - `guardian/config.yaml` - Guardian config
 - `guardian/guardian-ctl` - Guardian CLI tool
+- `scripts/alpha-engine/config.py` - Alpha engine configuration (AlphaConfig)
+- `scripts/alpha-engine/tick_buffer.py` - High-performance tick ring buffer (TickBufferManager)
+- `scripts/alpha-engine/scalping_features.py` - Microstructure feature engine (ScalpingFeatureEngine)
+- `scripts/alpha-engine/label_engine.py` - ML label generation: triple barrier, forward returns (LabelEngine)
+- `scripts/alpha-engine/dataset_builder.py` - ML dataset assembly with temporal splits (DatasetBuilder)
+- `scripts/alpha-engine/alpha_store.py` - SQLite persistence for features, labels, datasets (AlphaStore)
 
 ## VPS Environment
 - Python 3.12.3 (venv at /opt/trading-desk/venv/)
@@ -60,6 +67,15 @@ The data pipeline at `scripts/data-pipeline/` provides:
 - **FeatureEngine**: 25+ technical indicators computed from candle data (SMA, EMA, MACD, RSI, ADX, ATR, Bollinger, Stochastic, price action) with ML-ready vector output
 - **DataBus**: Pub/sub event bus with in-process callbacks and HTTP webhook delivery for cross-service events (tick, candle_close, regime_change, signal, order_fill, risk_alert)
 - **REST API**: Port 5300 - ticks, candles, features, historical management, event bus, webhooks
+
+## Alpha Engine (Project Alpha - Phase 3)
+The alpha engine at `scripts/alpha-engine/` provides the data foundation for ML-based scalping:
+- **TickBufferManager**: Per-symbol ring buffers (50k ticks default) with O(1) append, rolling spread EMA, tick-rate stats
+- **ScalpingFeatureEngine**: 35+ microstructure features — price velocity/acceleration, spread z-score, order-flow imbalance, microprice, realized volatility, tick intensity, level proximity
+- **LabelEngine**: Forward-looking label generation — multi-horizon returns (5s–120s), triple-barrier (TP/SL/time-expiry), ternary direction classification
+- **DatasetBuilder**: ML dataset assembly — temporal train/val/test splits with purge gaps, outlier clipping, z-score/minmax normalisation (fitted on train only)
+- **AlphaStore**: SQLite WAL-mode persistence for computed features, labels, dataset metadata, and normalisation statistics
+- **Integration**: Consumes ticks from FIX API (port 5200) via DataBus, stores to data-pipeline (port 5300), features computed from TickRing buffers
 
 ## Important Notes
 - `.env` files are in `.gitignore` - never commit secrets

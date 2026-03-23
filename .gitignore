@@ -19,6 +19,7 @@ ctrader-mcp-server/.env
 data/historical/
 data/live/
 data/hmm-models/
+data/alpha/
 chromadb-data/
 n8n-data/
 
