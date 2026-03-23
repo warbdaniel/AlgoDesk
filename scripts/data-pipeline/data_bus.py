@@ -77,11 +77,11 @@ class DataBus:
 
         # Async webhook delivery queue
         self._webhook_queue: queue.Queue = queue.Queue(maxsize=10000)
+        self._running = True
         self._webhook_thread = threading.Thread(
             target=self._webhook_delivery_loop, daemon=True, name="webhook-delivery"
         )
         self._webhook_thread.start()
-        self._running = True
 
     # ── In-process subscriptions ─────────────────────────────────
 

@@ -88,16 +88,19 @@ def on_tick_received(symbol: str, bid: float, ask: float,
         symbol=symbol, bid=bid, ask=ask,
         bid_size=bid_size, ask_size=ask_size, timestamp=time.time(),
     )
+    batch = None
     with _tick_lock:
         _tick_buffer.append(tick)
         if len(_tick_buffer) >= _TICK_BATCH_SIZE:
             batch = _tick_buffer[:]
             _tick_buffer.clear()
-            if store:
-                try:
-                    store.insert_ticks_batch(batch)
-                except Exception:
-                    logger.exception("Failed to flush tick batch")
+
+    # Write outside the lock to avoid blocking tick ingestion
+    if batch and store:
+        try:
+            store.insert_ticks_batch(batch)
+        except Exception:
+            logger.exception("Failed to flush tick batch")
 
     if bus:
         bus.emit_tick(symbol, bid, ask, bid_size, ask_size)
@@ -278,6 +281,22 @@ def get_latest_tick(symbol: str):
     if not store:
         raise HTTPException(503, "Store not initialized")
     tick = store.get_latest_tick(symbol)
+
+    # Also check the in-memory buffer for more recent ticks
+    with _tick_lock:
+        buffered = [t for t in _tick_buffer if t.symbol == symbol]
+    if buffered:
+        latest_buffered = buffered[-1]
+        if not tick or latest_buffered.timestamp > tick.get("ts", 0):
+            tick = {
+                "symbol": latest_buffered.symbol,
+                "bid": latest_buffered.bid,
+                "ask": latest_buffered.ask,
+                "bid_size": latest_buffered.bid_size,
+                "ask_size": latest_buffered.ask_size,
+                "ts": latest_buffered.timestamp,
+            }
+
     if not tick:
         raise HTTPException(404, f"No ticks for {symbol}")
     return tick
