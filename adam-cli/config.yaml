@@ -1,0 +1,38 @@
+# Adam CLI Configuration
+# AlgoDesk Trading Desk CLI Tool
+
+services:
+  regime-detector:
+    url: http://localhost:5000
+    name: Regime Detector
+  dashboard:
+    url: http://localhost:5100
+    name: Dashboard
+  fix-api:
+    url: http://localhost:5200
+    name: FIX API
+  data-pipeline:
+    url: http://localhost:5300
+    name: Data Pipeline
+  claude-api:
+    url: http://localhost:5400
+    name: Claude API Agent
+
+defaults:
+  timeframe: "1h"
+  candle_limit: 20
+  trade_limit: 20
+  event_limit: 20
+  log_lines: 50
+  request_timeout: 5
+
+# Symbol mapping file path
+symbol_mapping_path: /opt/trading-desk/data/symbol_mapping.json
+
+# Alert thresholds
+alerts:
+  rsi_overbought: 70
+  rsi_oversold: 30
+  adx_strong: 25
+  spread_warning_pips: 5.0
+  margin_level_warning: 200
