@@ -54,6 +54,12 @@ services:
     - port: 5100
       name: "analytics-dashboard"
       protocol: tcp
+    - port: 5200
+      name: "fix-api"
+      protocol: tcp
+    - port: 5300
+      name: "data-pipeline"
+      protocol: tcp
 
   processes:
     - name: "dockerd"
@@ -64,7 +70,7 @@ services:
 # --- Network Security ---
 network:
   # Ports that SHOULD be listening (allowlist)
-  expected_listening_ports: [22, 53, 5000, 5100, 5678]
+  expected_listening_ports: [22, 53, 5000, 5100, 5200, 5300, 5678]
   # Alert on unexpected outbound connections
   monitor_outbound: true
   # Max connections before warning
@@ -85,6 +91,9 @@ file_integrity:
     - /opt/trading-desk/scripts/regime-detector/regime_detector.py
     - /etc/ssh/sshd_config
     - /opt/trading-desk/dashboard/dashboard.py
+    - /opt/trading-desk/scripts/data-pipeline/config.yaml
+    - /opt/trading-desk/scripts/data-pipeline/data_api_server.py
+    - /opt/trading-desk/scripts/fix-api/fix_config.yaml
   watch_directories:
     - path: /opt/trading-desk/configs/
       recursive: false

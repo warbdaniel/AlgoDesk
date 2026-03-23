@@ -1,0 +1,49 @@
+# AlgoDesk Data Pipeline Configuration
+# Phase 2: Data Infrastructure
+
+database:
+  path: /opt/trading-desk/data/market_data.db
+  tick_retention_days: 7      # Auto-purge ticks older than this
+
+pipeline:
+  tick_batch_size: 100        # Buffer ticks before writing to DB
+  tick_flush_interval: 5.0    # Max seconds between flush
+  event_history_size: 1000    # Non-tick events kept in memory
+
+# Default symbols to register on startup
+symbols:
+  - id: "1"
+    description: EURUSD
+    pip_size: 0.0001
+    digits: 5
+  - id: "2"
+    description: GBPUSD
+    pip_size: 0.0001
+    digits: 5
+
+# Candle aggregation intervals to auto-build from ticks
+auto_aggregate:
+  enabled: true
+  intervals:
+    - "1m"
+    - "5m"
+    - "15m"
+    - "1h"
+
+# Integration with FIX API (port 5200)
+fix_api:
+  url: http://localhost:5200
+  poll_interval: 0        # 0 = use callback, >0 = poll prices every N seconds
+
+# Integration with regime detector (port 5000)
+regime_detector:
+  url: http://localhost:5000
+
+# Integration with dashboard (port 5100)
+dashboard:
+  url: http://localhost:5100
+
+# REST API server
+api:
+  host: 0.0.0.0
+  port: 5300
