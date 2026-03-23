@@ -1,6 +1,7 @@
 """
 Core FIX 4.4 connector with SSL, logon/logout/heartbeat,
-sequence number persistence, auto-reconnect, and thread-safety.
+sequence number persistence, auto-reconnect, thread-safety,
+message validation, sequence gap detection, and connection health metrics.
 """
 
 import os
@@ -10,6 +11,8 @@ import time
 import json
 import threading
 import logging
+from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -21,10 +24,60 @@ SOH = b"\x01"
 FIX_VERSION = b"FIX.4.4"
 SEQ_FILE = Path(__file__).parent / ".seq_numbers.json"
 HEARTBEAT_INTERVAL = 30
+MAX_RECV_BUFFER = 1024 * 1024  # 1 MB max receive buffer to prevent memory exhaustion
+MAX_MESSAGE_SIZE = 64 * 1024   # 64 KB max single FIX message
+
+
+# ── Connection health metrics ────────────────────────────────────
+
+@dataclass
+class ConnectionHealth:
+    """Tracks connection quality metrics."""
+    connected_since: float = 0.0
+    last_send_time: float = 0.0
+    last_recv_time: float = 0.0
+    messages_sent: int = 0
+    messages_received: int = 0
+    reconnect_count: int = 0
+    last_reconnect_time: float = 0.0
+    send_errors: int = 0
+    recv_errors: int = 0
+    seq_gaps_detected: int = 0
+    invalid_messages: int = 0
+    latency_samples: deque = field(default_factory=lambda: deque(maxlen=100))
+
+    @property
+    def avg_latency_ms(self) -> float:
+        if not self.latency_samples:
+            return 0.0
+        return sum(self.latency_samples) / len(self.latency_samples)
+
+    @property
+    def uptime_seconds(self) -> float:
+        if self.connected_since <= 0:
+            return 0.0
+        return time.time() - self.connected_since
+
+    def to_dict(self) -> dict:
+        return {
+            "connected_since": datetime.fromtimestamp(
+                self.connected_since, tz=timezone.utc
+            ).isoformat() if self.connected_since > 0 else None,
+            "uptime_seconds": round(self.uptime_seconds, 1),
+            "messages_sent": self.messages_sent,
+            "messages_received": self.messages_received,
+            "reconnect_count": self.reconnect_count,
+            "send_errors": self.send_errors,
+            "recv_errors": self.recv_errors,
+            "seq_gaps_detected": self.seq_gaps_detected,
+            "invalid_messages": self.invalid_messages,
+            "avg_latency_ms": round(self.avg_latency_ms, 2),
+        }
 
 
 class FIXConnector:
-    """Thread-safe FIX 4.4 client with SSL, heartbeat, and auto-reconnect."""
+    """Thread-safe FIX 4.4 client with SSL, heartbeat, auto-reconnect,
+    message validation, sequence gap detection, and health monitoring."""
 
     def __init__(
         self,
@@ -68,6 +121,15 @@ class FIXConnector:
 
         self._parser = simplefix.FixParser()
         self._seq_key = f"{sender_sub_id}_{port}"
+
+        # Connection health metrics
+        self.health = ConnectionHealth()
+
+        # Buffer overflow protection
+        self._recv_buf_size = 0
+
+        # Pending test requests for latency measurement
+        self._pending_test_requests: dict[str, float] = {}
 
         self._load_sequence_numbers()
 
@@ -122,6 +184,8 @@ class FIXConnector:
             self._ssl_sock.connect((self.host, self.port))
             self._ssl_sock.settimeout(1)
             self._connected = True
+            self.health.connected_since = time.time()
+            self._recv_buf_size = 0
             logger.info("SSL connected to %s:%d", self.host, self.port)
 
             self._recv_thread = threading.Thread(
@@ -166,6 +230,8 @@ class FIXConnector:
         delay = min(self.reconnect_delay, self.max_reconnect_delay)
         logger.info("Reconnecting in %.1fs ...", delay)
         self.reconnect_delay = min(delay * 2, self.max_reconnect_delay)
+        self.health.reconnect_count += 1
+        self.health.last_reconnect_time = time.time()
         threading.Timer(delay, self._reconnect).start()
 
     def _reconnect(self):
@@ -208,16 +274,23 @@ class FIXConnector:
         seq = self._next_send_seq()
         msg.append_pair(34, str(seq).encode())
         raw = msg.encode()
+
+        if len(raw) > MAX_MESSAGE_SIZE:
+            raise ValueError(f"Message too large: {len(raw)} bytes (max {MAX_MESSAGE_SIZE})")
+
         with self._send_lock:
             if not self._connected or not self._ssl_sock:
                 raise ConnectionError("Not connected")
             try:
                 self._ssl_sock.sendall(raw)
                 self._last_send_time = time.monotonic()
+                self.health.last_send_time = time.time()
+                self.health.messages_sent += 1
                 msg_type = _get_field(msg, 35)
                 logger.debug("SENT [%s] seq=%d", msg_type, seq)
             except Exception as e:
                 logger.error("Send failed: %s", e)
+                self.health.send_errors += 1
                 self._connected = False
                 if self._should_run:
                     self._schedule_reconnect()
@@ -254,12 +327,17 @@ class FIXConnector:
         msg = self.build_message(b"1")
         req_id = str(int(time.time()))
         msg.append_pair(112, req_id.encode())
+        self._pending_test_requests[req_id] = time.monotonic()
+        # Prune old pending requests (older than 60s)
+        cutoff = time.monotonic() - 60
+        stale = [k for k, v in self._pending_test_requests.items() if v < cutoff]
+        for k in stale:
+            del self._pending_test_requests[k]
         self.send_message(msg)
 
     # ── Receive loop ─────────────────────────────────────────────
 
     def _recv_loop(self):
-        buf = b""
         while self._should_run and self._connected:
             try:
                 data = self._ssl_sock.recv(4096)
@@ -267,29 +345,117 @@ class FIXConnector:
                     logger.warning("Connection closed by remote")
                     self._connected = False
                     break
-                buf += data
+                self._recv_buf_size += len(data)
+                if self._recv_buf_size > MAX_RECV_BUFFER:
+                    logger.error(
+                        "Receive buffer overflow (%d bytes), reconnecting",
+                        self._recv_buf_size,
+                    )
+                    self.health.recv_errors += 1
+                    self._connected = False
+                    break
                 self._parser.append_buffer(data)
                 while True:
                     msg = self._parser.get_message()
                     if msg is None:
                         break
+                    self._recv_buf_size = 0  # Reset after successful parse
                     self._last_recv_time = time.monotonic()
+                    self.health.last_recv_time = time.time()
+                    self.health.messages_received += 1
                     self._handle_message(msg)
             except socket.timeout:
                 continue
             except Exception as e:
                 if self._should_run:
                     logger.error("Recv error: %s", e)
+                    self.health.recv_errors += 1
                     self._connected = False
                 break
 
         if self._should_run:
             self._schedule_reconnect()
 
+    def _validate_message(self, msg: simplefix.FixMessage) -> bool:
+        """Validate essential FIX message fields. Returns True if valid."""
+        msg_type = _get_field(msg, 35)
+        if not msg_type:
+            logger.warning("Received message with no MsgType (35)")
+            self.health.invalid_messages += 1
+            return False
+
+        # Validate SenderCompID matches expected TargetCompID
+        sender = _get_field(msg, 49)
+        if sender and sender != self.target_comp_id:
+            logger.warning(
+                "Unexpected SenderCompID: got %s, expected %s", sender, self.target_comp_id
+            )
+            self.health.invalid_messages += 1
+            return False
+
+        # Validate TargetCompID matches our SenderCompID
+        target = _get_field(msg, 56)
+        if target and target != self.sender_comp_id:
+            logger.warning(
+                "Unexpected TargetCompID: got %s, expected %s", target, self.sender_comp_id
+            )
+            self.health.invalid_messages += 1
+            return False
+
+        return True
+
+    def _check_sequence_gap(self, seq_num_str: str | None) -> bool:
+        """Check for sequence number gaps. Returns True if gap detected."""
+        if not seq_num_str:
+            return False
+        try:
+            seq_num = int(seq_num_str)
+        except ValueError:
+            return False
+
+        with self._seq_lock:
+            expected = self._recv_seq
+            if seq_num > expected:
+                gap_size = seq_num - expected
+                logger.warning(
+                    "Sequence gap detected: expected %d, got %d (gap=%d)",
+                    expected, seq_num, gap_size,
+                )
+                self.health.seq_gaps_detected += 1
+                # Send Resend Request (35=2) for missing messages
+                self._request_resend(expected, seq_num - 1)
+                self._recv_seq = seq_num + 1
+                return True
+            elif seq_num < expected:
+                # Possible duplicate or resend — log but don't reject
+                logger.debug("Received seq %d, expected %d (possible resend)", seq_num, expected)
+            else:
+                self._recv_seq = seq_num + 1
+        return False
+
+    def _request_resend(self, begin_seq: int, end_seq: int):
+        """Send a Resend Request (35=2) for missing sequence range."""
+        try:
+            msg = self.build_message(b"2")
+            msg.append_pair(7, str(begin_seq).encode())   # BeginSeqNo
+            msg.append_pair(16, str(end_seq).encode())     # EndSeqNo
+            self.send_message(msg)
+            logger.info("Resend request sent for seq %d-%d", begin_seq, end_seq)
+        except Exception:
+            logger.exception("Failed to send resend request")
+
     def _handle_message(self, msg: simplefix.FixMessage):
+        # Validate message
+        if not self._validate_message(msg):
+            return
+
         msg_type = _get_field(msg, 35)
         seq_num = _get_field(msg, 34)
-        if seq_num:
+
+        # Check for sequence gaps (skip for logon/logout which may reset seq)
+        if msg_type not in ("A", "5"):
+            self._check_sequence_gap(seq_num)
+        elif seq_num:
             with self._seq_lock:
                 self._recv_seq = int(seq_num) + 1
 
@@ -306,16 +472,26 @@ class FIXConnector:
                 self._schedule_reconnect()
             return
         elif msg_type == "0":  # Heartbeat
-            logger.debug("Heartbeat received")
+            # Measure latency from test request -> heartbeat response
+            test_id = _get_field(msg, 112)
+            if test_id and test_id in self._pending_test_requests:
+                sent_at = self._pending_test_requests.pop(test_id)
+                latency_ms = (time.monotonic() - sent_at) * 1000
+                self.health.latency_samples.append(latency_ms)
+                logger.debug("Heartbeat latency: %.1fms", latency_ms)
+            else:
+                logger.debug("Heartbeat received")
         elif msg_type == "1":  # Test Request
             test_id = _get_field(msg, 112)
             self._send_heartbeat(test_id)
         elif msg_type == "3":  # Reject
             reason = _get_field(msg, 58)
-            logger.warning("Session reject: %s", reason)
+            ref_seq = _get_field(msg, 45)
+            logger.warning("Session reject: seq=%s reason=%s", ref_seq, reason)
         elif msg_type == "j":  # Business reject
             reason = _get_field(msg, 58)
-            logger.warning("Business reject: %s", reason)
+            ref_id = _get_field(msg, 372)
+            logger.warning("Business reject: refMsgType=%s reason=%s", ref_id, reason)
 
         if self.on_message:
             try:
@@ -337,11 +513,20 @@ class FIXConnector:
                 except Exception:
                     break
             if self._logged_in and (now - self._last_recv_time) > HEARTBEAT_INTERVAL * 2:
-                logger.warning("No data received, sending test request")
+                logger.warning("No data received for %ds, sending test request",
+                               HEARTBEAT_INTERVAL * 2)
                 try:
                     self._send_test_request()
                 except Exception:
                     break
+            # Force reconnect if no data for 3x heartbeat interval
+            if self._logged_in and (now - self._last_recv_time) > HEARTBEAT_INTERVAL * 3:
+                logger.error(
+                    "Connection appears dead (no data for %ds), forcing reconnect",
+                    HEARTBEAT_INTERVAL * 3,
+                )
+                self._connected = False
+                break
 
 
 def _get_field(msg: simplefix.FixMessage, tag: int) -> str | None:
