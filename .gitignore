@@ -12,6 +12,7 @@ build/
 .env
 *.env
 .env.*
+!.env.example
 ctrader-mcp-server/.env
 
 # Data files (too large for git)

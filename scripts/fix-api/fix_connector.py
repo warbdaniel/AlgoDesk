@@ -182,7 +182,7 @@ class FIXConnector:
             ctx.verify_mode = ssl.CERT_NONE
             self._ssl_sock = ctx.wrap_socket(raw, server_hostname=self.host)
             self._ssl_sock.connect((self.host, self.port))
-            self._ssl_sock.settimeout(1)
+            self._ssl_sock.settimeout(5)
             self._connected = True
             self.health.connected_since = time.time()
             self._recv_buf_size = 0
@@ -363,9 +363,24 @@ class FIXConnector:
                     self._last_recv_time = time.monotonic()
                     self.health.last_recv_time = time.time()
                     self.health.messages_received += 1
+                    self.reconnect_delay = 5.0  # Reset backoff on successful recv
                     self._handle_message(msg)
             except socket.timeout:
                 continue
+            except ssl.SSLError as e:
+                if self._should_run:
+                    logger.error("SSL error: %s", e)
+                    self.health.recv_errors += 1
+                    self._connected = False
+                    try:
+                        self._ssl_sock.shutdown(socket.SHUT_RDWR)
+                    except Exception:
+                        pass
+                    try:
+                        self._ssl_sock.close()
+                    except Exception:
+                        pass
+                break
             except Exception as e:
                 if self._should_run:
                     logger.error("Recv error: %s", e)
