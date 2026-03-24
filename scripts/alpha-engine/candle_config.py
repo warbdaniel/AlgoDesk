@@ -44,6 +44,18 @@ CANDLE_SYMBOLS = {
 
 DEFAULT_CANDLE_SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY"]
 
+# ---------------------------------------------------------------------------
+# Symbol ↔ numeric ID mapping (matches data-pipeline's SQLite DB)
+# ---------------------------------------------------------------------------
+SYMBOL_NAME_TO_ID = {
+    "EURUSD": "1", "GBPUSD": "2", "USDJPY": "3", "USDCHF": "4",
+    "AUDUSD": "5", "USDCAD": "6", "NZDUSD": "7", "EURGBP": "8",
+    "EURJPY": "9", "GBPJPY": "10", "CHFJPY": "11", "CADJPY": "13",
+    "NZDJPY": "14", "XAUUSD": "41", "BTCUSD": "114",
+}
+
+SYMBOL_ID_TO_NAME = {v: k for k, v in SYMBOL_NAME_TO_ID.items()}
+
 
 # ---------------------------------------------------------------------------
 # Feature configuration
@@ -115,6 +127,11 @@ class CandleLabelConfig:
     barrier_sl_pips: float = 15.0
     barrier_max_candles: int = 24    # max holding = 24 * 5min = 2 hours
 
+    # ATR-based barriers (preferred for multi-pair systems)
+    barrier_use_atr: bool = True          # True = ATR-based, False = fixed pips
+    barrier_tp_atr_mult: float = 2.0      # TP = 2.0 x ATR(14)
+    barrier_sl_atr_mult: float = 1.0      # SL = 1.0 x ATR(14)
+
     # Maximum forward drawdown horizon (candles) for risk labels
     max_drawdown_horizon: int = 12
 
@@ -167,6 +184,11 @@ class CandleMLConfig:
 
     # Data source: path to data-pipeline's SQLite DB
     data_pipeline_db: str = "/opt/trading-desk/data/market_data.db"
+
+    # Data source: Parquet directory (preferred over SQLite for historical data)
+    # Pipeline checks for {parquet_dir}/{SYMBOL}_5M.parquet first, then falls
+    # back to the SQLite DB.
+    parquet_dir: str = str(PROJECT_ROOT / "data" / "historical" / "candles_5m")
 
     # Storage: path for candle ML artifacts
     db_path: str = str(CANDLE_DATA_DIR / "candle_ml.db")

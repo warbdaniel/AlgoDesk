@@ -142,8 +142,16 @@ class CandleLabelEngine:
 
         long_thresh = self._cfg.long_threshold_pips * pip_size
         short_thresh = self._cfg.short_threshold_pips * pip_size
-        tp_dist = self._cfg.barrier_tp_pips * pip_size
-        sl_dist = self._cfg.barrier_sl_pips * pip_size
+
+        # Fixed-pip barrier distances (used when barrier_use_atr=False)
+        fixed_tp_dist = self._cfg.barrier_tp_pips * pip_size
+        fixed_sl_dist = self._cfg.barrier_sl_pips * pip_size
+
+        # Pre-compute ATR(14) series for ATR-based barriers
+        use_atr = self._cfg.barrier_use_atr
+        atr_series: list[float] = []
+        if use_atr:
+            atr_series = _atr(highs, lows, closes, 14)
 
         labels: list[CandleLabel] = []
 
@@ -175,6 +183,13 @@ class CandleLabelEngine:
                 setattr(lbl, f"dir_{h}", float(direction))
 
             # ── Triple barrier ────────────────────────────────
+            if use_atr and atr_series[i] > 0:
+                tp_dist = atr_series[i] * self._cfg.barrier_tp_atr_mult
+                sl_dist = atr_series[i] * self._cfg.barrier_sl_atr_mult
+            else:
+                tp_dist = fixed_tp_dist
+                sl_dist = fixed_sl_dist
+
             barrier_label, barrier_ret, barrier_dur = self._triple_barrier(
                 closes, highs, lows, i, entry_close, tp_dist, sl_dist,
             )
@@ -251,3 +266,31 @@ class CandleLabelEngine:
         last_idx = min(idx + max_candles, n - 1)
         expiry_ret = closes[last_idx] - entry_price
         return (int(CandleBarrierHit.TIME_EXPIRY), expiry_ret, max_candles)
+
+
+# ---------------------------------------------------------------------------
+# ATR helper (self-contained to avoid circular import with candle_features)
+# ---------------------------------------------------------------------------
+def _atr(highs: list[float], lows: list[float], closes: list[float],
+         period: int = 14) -> list[float]:
+    """Average True Range — Wilder's smoothed."""
+    n = len(highs)
+    result = [0.0] * n
+    if n < 2:
+        return result
+
+    true_ranges = [highs[0] - lows[0]]
+    for i in range(1, n):
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        )
+        true_ranges.append(tr)
+
+    if len(true_ranges) >= period:
+        result[period - 1] = sum(true_ranges[:period]) / period
+        for i in range(period, len(true_ranges)):
+            result[i] = (result[i - 1] * (period - 1) + true_ranges[i]) / period
+
+    return result
