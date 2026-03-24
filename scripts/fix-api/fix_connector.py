@@ -9,6 +9,7 @@ import ssl
 import socket
 import time
 import json
+import random
 import threading
 import logging
 from collections import deque
@@ -154,7 +155,11 @@ class FIXConnector:
         try:
             data = {}
             if SEQ_FILE.exists():
-                data = json.loads(SEQ_FILE.read_text())
+                try:
+                    data = json.loads(SEQ_FILE.read_text())
+                except (json.JSONDecodeError, ValueError):
+                    logger.warning("Corrupted seq file, resetting")
+                    data = {}
             data[self._seq_key] = {"send": self._send_seq, "recv": self._recv_seq}
             SEQ_FILE.write_text(json.dumps(data, indent=2))
         except Exception:
@@ -178,6 +183,7 @@ class FIXConnector:
             raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             raw.settimeout(15)
             ctx = ssl.create_default_context()
+            ctx.maximum_version = ssl.TLSVersion.TLSv1_2
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             self._ssl_sock = ctx.wrap_socket(raw, server_hostname=self.host)
@@ -228,6 +234,7 @@ class FIXConnector:
         if not self._should_run:
             return
         delay = min(self.reconnect_delay, self.max_reconnect_delay)
+        delay += random.uniform(0.5, 2.0)
         logger.info("Reconnecting in %.1fs ...", delay)
         self.reconnect_delay = min(delay * 2, self.max_reconnect_delay)
         self.health.reconnect_count += 1
@@ -480,7 +487,8 @@ class FIXConnector:
                 self._logged_in = True
             self.reconnect_delay = 5.0
         elif msg_type == "5":  # Logout
-            logger.info("Logout received")
+            reason = _get_field(msg, 58)
+            logger.info("Logout received%s", f": {reason}" if reason else "")
             with self._state_lock:
                 self._logged_in = False
             if self._should_run:

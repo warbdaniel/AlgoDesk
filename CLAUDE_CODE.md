@@ -18,7 +18,7 @@ dashboard/                 → Analytics Dashboard (FastAPI on port 5100)
 guardian/                  → Trading Desk Guardian (systemd daemon)
 ctrader-mcp-server/       → cTrader MCP Server (14 tools)
 scripts/alpha-engine/     → Project Alpha ML Scalping Engine (data foundation)
-scripts/utils/            → Utility scripts (deploy.sh)
+scripts/utils/            → Utility scripts (deploy.sh, deploy_webhook.py)
 ```
 
 ## Services on VPS
@@ -28,6 +28,7 @@ scripts/utils/            → Utility scripts (deploy.sh)
 - **data-pipeline** (PM2) - FastAPI port 5300
 - **blackjack-advisor** (PM2) - separate project
 - **trading-guardian** (systemd) - monitoring daemon
+- **deploy-webhook** (PM2) - GitHub webhook CI/CD port 9000
 - **n8n** (Docker) - workflow automation port 5678
 
 ## Key Files
