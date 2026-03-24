@@ -296,6 +296,123 @@ def _build_tool_specs() -> list[ToolSpec]:
             required=[],
             fn=lambda urls, **kw: tools.get_analytics(urls["dashboard"]),
         ),
+
+        # ── continuous learning system ────────────────────────────
+        ToolSpec(
+            name="cls_status",
+            description=(
+                "Get full Continuous Learning System status: model registry, "
+                "retrain orchestrator, performance alerts, and learning loop state."
+            ),
+            properties={},
+            required=[],
+            fn=lambda urls, **kw: tools.cls_status(urls["cls"]),
+        ),
+        ToolSpec(
+            name="cls_list_models",
+            description="List registered ML models with their status (champion/challenger/retired).",
+            properties={
+                "symbol": {"type": "string", "description": "Filter by symbol (optional)"},
+            },
+            required=[],
+            fn=lambda urls, **kw: tools.cls_list_models(urls["cls"], kw.get("symbol")),
+        ),
+        ToolSpec(
+            name="cls_get_champion",
+            description="Get the current champion (production) model for a symbol.",
+            properties={
+                "symbol": {"type": "string", "description": "Trading symbol, e.g. 'EURUSD'"},
+            },
+            required=["symbol"],
+            fn=lambda urls, **kw: tools.cls_get_champion(urls["cls"], kw["symbol"]),
+        ),
+        ToolSpec(
+            name="cls_evaluate_performance",
+            description=(
+                "Evaluate current model performance for a symbol: accuracy, AUC, "
+                "win rate, profit factor, and check for degradation alerts."
+            ),
+            properties={
+                "symbol": {"type": "string", "description": "Trading symbol"},
+            },
+            required=["symbol"],
+            fn=lambda urls, **kw: tools.cls_evaluate_performance(urls["cls"], kw["symbol"]),
+        ),
+        ToolSpec(
+            name="cls_performance_trend",
+            description="Get performance trend analysis (improving/stable/declining) for a symbol.",
+            properties={
+                "symbol": {"type": "string", "description": "Trading symbol"},
+            },
+            required=["symbol"],
+            fn=lambda urls, **kw: tools.cls_performance_trend(urls["cls"], kw["symbol"]),
+        ),
+        ToolSpec(
+            name="cls_check_drift",
+            description=(
+                "Run feature drift (PSI/KS) and concept drift (ADWIN) detection "
+                "for a symbol's champion model."
+            ),
+            properties={
+                "symbol": {"type": "string", "description": "Trading symbol"},
+            },
+            required=["symbol"],
+            fn=lambda urls, **kw: tools.cls_check_drift(urls["cls"], kw["symbol"]),
+        ),
+        ToolSpec(
+            name="cls_get_alerts",
+            description="Get active CLS performance alerts across all symbols.",
+            properties={},
+            required=[],
+            fn=lambda urls, **kw: tools.cls_get_alerts(urls["cls"]),
+        ),
+        ToolSpec(
+            name="cls_trigger_retrain",
+            description="Trigger model retraining for a symbol (produces a new challenger model).",
+            properties={
+                "symbol": {"type": "string", "description": "Trading symbol"},
+                "reason": {"type": "string", "description": "Reason for retraining (default 'manual')"},
+            },
+            required=["symbol"],
+            fn=lambda urls, **kw: tools.cls_trigger_retrain(
+                urls["cls"], kw["symbol"], kw.get("reason", "manual"),
+            ),
+            read_only=False,
+        ),
+        ToolSpec(
+            name="cls_retrain_status",
+            description="Get retrain orchestrator status: active retrains and recent history.",
+            properties={},
+            required=[],
+            fn=lambda urls, **kw: tools.cls_retrain_status(urls["cls"]),
+        ),
+        ToolSpec(
+            name="cls_loop_status",
+            description="Get continuous learning loop status (running, interval, cycles).",
+            properties={},
+            required=[],
+            fn=lambda urls, **kw: tools.cls_loop_status(urls["cls"]),
+        ),
+        ToolSpec(
+            name="cls_start_loop",
+            description="Start the continuous learning monitoring loop.",
+            properties={
+                "interval_seconds": {"type": "integer", "description": "Loop interval in seconds (default 300)"},
+            },
+            required=[],
+            fn=lambda urls, **kw: tools.cls_start_loop(
+                urls["cls"], kw.get("interval_seconds", 300),
+            ),
+            read_only=False,
+        ),
+        ToolSpec(
+            name="cls_stop_loop",
+            description="Stop the continuous learning monitoring loop.",
+            properties={},
+            required=[],
+            fn=lambda urls, **kw: tools.cls_stop_loop(urls["cls"]),
+            read_only=False,
+        ),
     ]
 
 
@@ -307,6 +424,8 @@ a live FX algorithmic trading infrastructure. You have direct access to:
 • **FIX API** – live bid/ask prices, order placement/cancellation, positions, account info
 • **Data Pipeline** – stored candles, 42+ technical indicators, event bus
 • **Dashboard** – historical trade log, performance analytics (Sharpe, PF, win rate, drawdown)
+• **Continuous Learning System (CLS)** – model registry (champion/challenger), performance \
+monitoring, feature & concept drift detection, automated retraining, and feedback loop
 
 **Guidelines**
 1. Always check the current regime and key indicators before recommending or placing trades.
@@ -317,6 +436,7 @@ a live FX algorithmic trading infrastructure. You have direct access to:
 5. If a service is down, report it clearly and suggest what can still be done.
 6. Prefer structured, concise answers. Use tables for multi-symbol comparisons.
 7. You are allowed to call multiple tools in sequence to build a complete picture.
+8. When asked about model health, use CLS tools to check performance, drift, and alerts.
 """
 
 
