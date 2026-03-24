@@ -113,7 +113,7 @@ def _is_auth_enabled() -> bool:
 
 # ── Auth middleware ──────────────────────────────────────────────
 
-PUBLIC_PATHS = {"/", "/health", "/auth/login", "/auth/check"}
+PUBLIC_PATHS = {"/", "/health", "/services/health", "/auth/login", "/auth/check"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -313,6 +313,52 @@ async def health():
         total_queries=query_count,
         services=SERVICE_URLS,
     )
+
+
+@app.get("/services/health")
+async def services_health():
+    """Proxy health checks for all AlgoDesk microservices.
+
+    Returns a consolidated view so the frontend only needs to hit this
+    single endpoint instead of reaching each service directly.
+    """
+    import concurrent.futures
+
+    service_map = {
+        "regime_detector": SERVICE_URLS["regime_detector"],
+        "dashboard": SERVICE_URLS["dashboard"],
+        "fix_api": SERVICE_URLS["fix_api"],
+        "data_pipeline": SERVICE_URLS["data_pipeline"],
+        "cls": SERVICE_URLS["cls"],
+    }
+
+    def _check(name: str, base_url: str) -> tuple[str, dict]:
+        try:
+            r = _requests.get(f"{base_url}/health", timeout=5)
+            if r.ok:
+                data = r.json()
+                return name, {"status": "ok", "url": base_url, "details": data}
+            return name, {"status": "error", "url": base_url, "http_status": r.status_code}
+        except _requests.RequestException as exc:
+            return name, {"status": "unreachable", "url": base_url, "error": str(exc)}
+
+    results: dict[str, dict] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+        futures = {pool.submit(_check, name, url): name for name, url in service_map.items()}
+        for future in concurrent.futures.as_completed(futures):
+            name, result = future.result()
+            results[name] = result
+
+    healthy = sum(1 for v in results.values() if v["status"] == "ok")
+    total = len(results)
+
+    return {
+        "status": "ok" if healthy == total else "degraded" if healthy > 0 else "down",
+        "healthy": healthy,
+        "total": total,
+        "services": results,
+        "ts": time.time(),
+    }
 
 
 @app.post("/query", response_model=QueryResponse)
