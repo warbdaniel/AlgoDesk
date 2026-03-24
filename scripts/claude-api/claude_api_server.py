@@ -58,6 +58,7 @@ SERVICE_URLS = {
     "dashboard": services_cfg.get("dashboard", "http://localhost:5100"),
     "fix_api": services_cfg.get("fix_api", "http://localhost:5200"),
     "data_pipeline": services_cfg.get("data_pipeline", "http://localhost:5300"),
+    "cls": services_cfg.get("cls", "http://localhost:5500"),
 }
 
 # ── Auth ─────────────────────────────────────────────────────────
@@ -414,6 +415,146 @@ async def get_config():
         "read_only": agent_cfg.get("read_only", False),
         "services": SERVICE_URLS,
     }
+
+
+# ── CLS proxy endpoints ──────────────────────────────────────────
+# These allow the web UI and external clients to interact with the
+# Continuous Learning System through the claude-api gateway.
+
+import requests as _requests
+
+_CLS_TIMEOUT = 15
+
+
+def _cls_proxy_get(path: str, params: dict | None = None):
+    """Forward a GET request to the CLS service."""
+    try:
+        r = _requests.get(
+            f"{SERVICE_URLS['cls']}{path}",
+            params=params,
+            timeout=_CLS_TIMEOUT,
+        )
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except _requests.RequestException as exc:
+        return JSONResponse(
+            content={"error": str(exc), "service": "cls"},
+            status_code=502,
+        )
+
+
+def _cls_proxy_post(path: str, payload: dict | None = None):
+    """Forward a POST request to the CLS service."""
+    try:
+        r = _requests.post(
+            f"{SERVICE_URLS['cls']}{path}",
+            json=payload,
+            timeout=_CLS_TIMEOUT,
+        )
+        return JSONResponse(content=r.json(), status_code=r.status_code)
+    except _requests.RequestException as exc:
+        return JSONResponse(
+            content={"error": str(exc), "service": "cls"},
+            status_code=502,
+        )
+
+
+@app.get("/cls/health")
+async def cls_health():
+    """CLS service health check."""
+    return _cls_proxy_get("/health")
+
+
+@app.get("/cls/status")
+async def cls_status():
+    """Full CLS system status."""
+    return _cls_proxy_get("/status")
+
+
+@app.get("/cls/models")
+async def cls_models(symbol: str = ""):
+    """List registered models."""
+    params = {"symbol": symbol} if symbol else {}
+    return _cls_proxy_get("/models", params)
+
+
+@app.get("/cls/models/{symbol}/champion")
+async def cls_champion(symbol: str):
+    """Get champion model for a symbol."""
+    return _cls_proxy_get(f"/models/{symbol}/champion")
+
+
+@app.get("/cls/performance/{symbol}")
+async def cls_performance(symbol: str):
+    """Evaluate model performance for a symbol."""
+    return _cls_proxy_get(f"/performance/{symbol}")
+
+
+@app.get("/cls/performance/{symbol}/trend")
+async def cls_performance_trend(symbol: str):
+    """Get performance trend for a symbol."""
+    return _cls_proxy_get(f"/performance/{symbol}/trend")
+
+
+@app.get("/cls/performance/alerts")
+async def cls_alerts():
+    """Get active performance alerts."""
+    return _cls_proxy_get("/performance/alerts")
+
+
+@app.get("/cls/drift/{symbol}")
+async def cls_drift(symbol: str):
+    """Run drift detection for a symbol."""
+    return _cls_proxy_get(f"/drift/{symbol}")
+
+
+@app.get("/cls/drift/{symbol}/history")
+async def cls_drift_history(symbol: str):
+    """Get drift detection history."""
+    return _cls_proxy_get(f"/drift/{symbol}/history")
+
+
+@app.post("/cls/retrain/{symbol}")
+async def cls_retrain(symbol: str, request: Request):
+    """Trigger model retraining."""
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    return _cls_proxy_post(f"/retrain/{symbol}", body)
+
+
+@app.get("/cls/retrain/status")
+async def cls_retrain_status():
+    """Get retrain orchestrator status."""
+    return _cls_proxy_get("/retrain/status")
+
+
+@app.get("/cls/retrain/history")
+async def cls_retrain_history():
+    """Get retraining history."""
+    return _cls_proxy_get("/retrain/history")
+
+
+@app.get("/cls/loop/status")
+async def cls_loop_status():
+    """Get learning loop status."""
+    return _cls_proxy_get("/loop/status")
+
+
+@app.post("/cls/loop/start")
+async def cls_loop_start(request: Request):
+    """Start the learning loop."""
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    return _cls_proxy_post("/loop/start", body)
+
+
+@app.post("/cls/loop/stop")
+async def cls_loop_stop():
+    """Stop the learning loop."""
+    return _cls_proxy_post("/loop/stop")
+
+
+@app.post("/cls/loop/tick")
+async def cls_loop_tick():
+    """Run one learning loop cycle."""
+    return _cls_proxy_post("/loop/tick")
 
 
 # ── Main ─────────────────────────────────────────────────────────

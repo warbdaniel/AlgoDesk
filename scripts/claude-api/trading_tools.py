@@ -222,3 +222,74 @@ def get_filters(base_url: str) -> str:
 
 def dashboard_health(base_url: str) -> str:
     return _json_summary(_get(f"{base_url}/health"))
+
+
+# ── Continuous Learning System (port 5500) ─────────────────────
+
+def cls_health(base_url: str) -> str:
+    return _json_summary(_get(f"{base_url}/health"))
+
+
+def cls_status(base_url: str) -> str:
+    """Get full CLS status: registry, retrain, alerts, loop state."""
+    return _json_summary(_get(f"{base_url}/status"))
+
+
+def cls_list_models(base_url: str, symbol: str | None = None) -> str:
+    """List registered models, optionally filtered by symbol."""
+    params = {"symbol": symbol} if symbol else {}
+    return _json_summary(_get(f"{base_url}/models", params))
+
+
+def cls_get_champion(base_url: str, symbol: str) -> str:
+    """Get the current champion model for a symbol."""
+    return _json_summary(_get(f"{base_url}/models/{symbol}/champion"))
+
+
+def cls_evaluate_performance(base_url: str, symbol: str) -> str:
+    """Evaluate current model performance for a symbol."""
+    return _json_summary(_get(f"{base_url}/performance/{symbol}"))
+
+
+def cls_performance_trend(base_url: str, symbol: str) -> str:
+    """Get performance trend analysis for a symbol."""
+    return _json_summary(_get(f"{base_url}/performance/{symbol}/trend"))
+
+
+def cls_check_drift(base_url: str, symbol: str) -> str:
+    """Run feature and concept drift detection for a symbol."""
+    return _json_summary(_get(f"{base_url}/drift/{symbol}"))
+
+
+def cls_get_alerts(base_url: str) -> str:
+    """Get active performance alerts."""
+    return _json_summary(_get(f"{base_url}/performance/alerts"))
+
+
+def cls_trigger_retrain(base_url: str, symbol: str, reason: str = "manual") -> str:
+    """Trigger model retraining for a symbol."""
+    return _json_summary(
+        _post(f"{base_url}/retrain/{symbol}", {"reason": reason})
+    )
+
+
+def cls_retrain_status(base_url: str) -> str:
+    """Get retrain orchestrator status and history."""
+    return _json_summary(_get(f"{base_url}/retrain/status"))
+
+
+def cls_loop_status(base_url: str) -> str:
+    """Get continuous learning loop status."""
+    return _json_summary(_get(f"{base_url}/loop/status"))
+
+
+def cls_start_loop(base_url: str, interval_seconds: int = 300) -> str:
+    """Start the continuous learning loop."""
+    return _json_summary(
+        _post(f"{base_url}/loop/start", {"interval_seconds": interval_seconds})
+    )
+
+
+def cls_stop_loop(base_url: str) -> str:
+    """Stop the continuous learning loop."""
+    return _json_summary(_post(f"{base_url}/loop/stop"))

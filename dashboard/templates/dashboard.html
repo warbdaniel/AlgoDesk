@@ -201,6 +201,84 @@
         }
         .regime-stat .label { color: #606880; }
 
+        /* CLS Panel */
+        .cls-section {
+            padding: 0 24px 12px;
+        }
+        .cls-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .cls-header h3 {
+            font-size: 15px;
+            font-weight: 600;
+            color: #c0c8d4;
+        }
+        .cls-header h3 span { color: #7b61ff; }
+        .cls-loop-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .cls-loop-running { background: #002b22; color: #00d4aa; border: 1px solid #00d4aa33; }
+        .cls-loop-stopped { background: #2b0016; color: #ff4d6a; border: 1px solid #ff4d6a33; }
+        .cls-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 12px;
+        }
+        .cls-card {
+            background: linear-gradient(135deg, #111827 0%, #151d2e 100%);
+            border: 1px solid #1e2740;
+            border-radius: 10px;
+            padding: 16px;
+        }
+        .cls-card h4 {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: #7b61ff;
+            margin-bottom: 10px;
+        }
+        .cls-metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 12px;
+        }
+        .cls-metric .label { color: #606880; }
+        .cls-metric .value { font-weight: 600; }
+        .cls-alert-item {
+            background: #1a0a10;
+            border: 1px solid #3a1020;
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin-top: 6px;
+            font-size: 11px;
+        }
+        .cls-alert-item .severity-critical { color: #ff4d6a; font-weight: 700; }
+        .cls-alert-item .severity-warning { color: #ffaa00; font-weight: 700; }
+        .cls-model-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        .badge-champion { background: #0a2520; color: #00d4aa; border: 1px solid #00d4aa33; }
+        .badge-challenger { background: #1a1535; color: #7b61ff; border: 1px solid #7b61ff33; }
+        .badge-drift-none { color: #00d4aa; }
+        .badge-drift-low { color: #88cc44; }
+        .badge-drift-moderate { color: #ffaa00; }
+        .badge-drift-high { color: #ff6644; }
+        .badge-drift-critical { color: #ff4d6a; }
+
         .empty-state {
             text-align: center;
             padding: 80px 24px;
@@ -374,6 +452,9 @@
             <div class="chart-card"><h3>P&L Distribution</h3><div id="pnlDistChart"></div></div>
         </div>`;
 
+        // CLS Panel (loaded asynchronously)
+        html += '<div class="cls-section" id="clsSection"><div class="cls-header"><h3><span>&#9670;</span> Continuous Learning System</h3><span class="cls-loop-badge cls-loop-stopped" id="clsLoopBadge">Loading...</span></div><div class="cls-grid" id="clsGrid"><div class="cls-card"><div class="cls-metric"><span class="label">Loading CLS data...</span></div></div></div></div>';
+
         // Regime breakdown
         const regimeKeys = Object.keys(analytics.by_regime);
         if (regimeKeys.length > 0) {
@@ -495,9 +576,124 @@
     document.getElementById('filterSymbol').addEventListener('change', loadDashboard);
     document.getElementById('filterRegime').addEventListener('change', loadDashboard);
 
+    // ── CLS Panel ────────────────────────────────────────────
+    const CLS_API = 'http://localhost:5500';
+
+    async function loadCLSData() {
+        try {
+            const [statusRes, alertsRes] = await Promise.all([
+                fetch(`${CLS_API}/status`).catch(() => null),
+                fetch(`${CLS_API}/performance/alerts`).catch(() => null),
+            ]);
+
+            if (!statusRes || !statusRes.ok) {
+                renderCLSOffline();
+                return;
+            }
+
+            const status = await statusRes.json();
+            const alertsData = alertsRes && alertsRes.ok ? await alertsRes.json() : {alerts: []};
+            renderCLSPanel(status, alertsData.alerts || []);
+        } catch(e) {
+            renderCLSOffline();
+        }
+    }
+
+    function renderCLSOffline() {
+        const badge = document.getElementById('clsLoopBadge');
+        const grid = document.getElementById('clsGrid');
+        if (badge) { badge.textContent = 'OFFLINE'; badge.className = 'cls-loop-badge cls-loop-stopped'; }
+        if (grid) {
+            grid.innerHTML = `<div class="cls-card" style="grid-column:1/-1;">
+                <div class="cls-metric"><span class="label">CLS service not reachable (port 5500)</span></div>
+            </div>`;
+        }
+    }
+
+    function renderCLSPanel(status, alerts) {
+        const badge = document.getElementById('clsLoopBadge');
+        const grid = document.getElementById('clsGrid');
+        if (!badge || !grid) return;
+
+        const loop = status.learning_loop || {};
+        if (loop.running) {
+            badge.textContent = 'LOOP RUNNING';
+            badge.className = 'cls-loop-badge cls-loop-running';
+        } else {
+            badge.textContent = 'LOOP STOPPED';
+            badge.className = 'cls-loop-badge cls-loop-stopped';
+        }
+
+        const store = status.store || {};
+        const registry = status.registry || {};
+        const retrain = status.retrain || {};
+
+        let html = '';
+
+        // Registry summary card
+        html += `<div class="cls-card">
+            <h4>Model Registry</h4>
+            <div class="cls-metric"><span class="label">Total Models</span><span class="value">${store.total_models || 0}</span></div>
+            <div class="cls-metric"><span class="label">Champions</span><span class="value positive">${store.champion_models || 0}</span></div>
+            <div class="cls-metric"><span class="label">Challengers</span><span class="value" style="color:#7b61ff">${store.challenger_models || 0}</span></div>
+            <div class="cls-metric"><span class="label">Loaded in Memory</span><span class="value">${registry.loaded_models || 0}</span></div>`;
+
+        // Per-symbol champions
+        const symbols = registry.symbols || {};
+        Object.keys(symbols).forEach(sym => {
+            const s = symbols[sym];
+            if (s.champion) {
+                html += `<div class="cls-metric"><span class="label">${sym}</span><span><span class="cls-model-badge badge-champion">v${s.champion.version}</span> AUC ${s.champion.auc.toFixed(4)}</span></div>`;
+            }
+        });
+        html += '</div>';
+
+        // Performance & Predictions card
+        html += `<div class="cls-card">
+            <h4>Predictions & Feedback</h4>
+            <div class="cls-metric"><span class="label">Total Predictions</span><span class="value">${store.total_predictions || 0}</span></div>
+            <div class="cls-metric"><span class="label">Unresolved</span><span class="value ${(store.unresolved_predictions || 0) > 50 ? 'negative' : ''}">${store.unresolved_predictions || 0}</span></div>
+            <div class="cls-metric"><span class="label">Feedback Records</span><span class="value">${store.total_feedback || 0}</span></div>
+            <div class="cls-metric"><span class="label">Loop Cycles</span><span class="value">${loop.cycles || 0}</span></div>
+            <div class="cls-metric"><span class="label">Loop Interval</span><span class="value">${loop.interval_seconds || 0}s</span></div>
+        </div>`;
+
+        // Drift & Retrain card
+        html += `<div class="cls-card">
+            <h4>Drift Detection & Retraining</h4>
+            <div class="cls-metric"><span class="label">Drift Snapshots</span><span class="value">${store.total_drift_snapshots || 0}</span></div>
+            <div class="cls-metric"><span class="label">Drift Detected</span><span class="value ${(store.drift_detected_count || 0) > 0 ? 'negative' : 'positive'}">${store.drift_detected_count || 0}</span></div>
+            <div class="cls-metric"><span class="label">Total Retrains</span><span class="value">${store.total_retrains || 0}</span></div>
+            <div class="cls-metric"><span class="label">Active Retrains</span><span class="value">${Object.keys(retrain.active_retrains || {}).length}</span></div>
+            <div class="cls-metric"><span class="label">Auto-Promote</span><span class="value">${retrain.auto_promote ? 'ON' : 'OFF'}</span></div>
+        </div>`;
+
+        // Alerts card
+        html += `<div class="cls-card">
+            <h4>Performance Alerts</h4>`;
+        if (alerts.length === 0) {
+            html += '<div class="cls-metric"><span class="label positive">No active alerts</span></div>';
+        } else {
+            alerts.slice(0, 5).forEach(a => {
+                const sevClass = a.severity === 'critical' ? 'severity-critical' : 'severity-warning';
+                html += `<div class="cls-alert-item">
+                    <span class="${sevClass}">[${a.severity.toUpperCase()}]</span>
+                    ${a.message}
+                </div>`;
+            });
+            if (alerts.length > 5) {
+                html += `<div class="cls-metric" style="margin-top:6px"><span class="label">+${alerts.length - 5} more alerts</span></div>`;
+            }
+        }
+        html += '</div>';
+
+        grid.innerHTML = html;
+    }
+
     // Initial load + auto-refresh every 30s
     loadDashboard();
-    autoRefreshTimer = setInterval(loadDashboard, 30000);
+    loadCLSData();
+    autoRefreshTimer = setInterval(() => { loadDashboard(); loadCLSData(); }, 30000);
     </script>
 </body>
 </html>
