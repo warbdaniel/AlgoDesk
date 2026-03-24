@@ -43,6 +43,7 @@ from candle_config import (
     CandleDatasetConfig,
     CANDLE_SYMBOLS,
     DEFAULT_CANDLE_SYMBOLS,
+    SYMBOL_NAME_TO_ID,
 )
 from candle_features import CandleFeatureEngine, CandleFeatureVector
 from candle_labels import CandleLabelEngine, CandleLabel
@@ -59,6 +60,57 @@ logger = logging.getLogger("candle_pipeline")
 # ---------------------------------------------------------------------------
 # Candle loader (reads from data-pipeline's SQLite DB)
 # ---------------------------------------------------------------------------
+def load_candles_from_parquet(
+    parquet_path: str,
+    symbol: str,
+) -> list[dict]:
+    """Load 5M candles from a Dukascopy Parquet file.
+
+    The Parquet has columns: timestamp (ms epoch), open, high, low, close,
+    volume, symbol.  Returns list of dicts matching CandleFeatureEngine's
+    expected format: {symbol, interval, open, high, low, close, volume,
+    open_time, close_time}.
+    """
+    import pandas as pd
+
+    path = Path(parquet_path)
+    if not path.exists():
+        logger.error("Parquet file not found: %s", path)
+        return []
+
+    df = pd.read_parquet(path)
+    logger.info("  Parquet loaded: %d rows from %s", len(df), path.name)
+
+    # Standardise column names to lowercase
+    df.columns = [c.strip().lower() for c in df.columns]
+
+    # Convert timestamp from milliseconds to seconds
+    if "timestamp" in df.columns:
+        ts_col = df["timestamp"]
+        # Detect ms vs s: if values are > 1e12 they're in milliseconds
+        if len(ts_col) > 0 and ts_col.iloc[0] > 1e12:
+            df["timestamp"] = ts_col / 1000.0
+        df.sort_values("timestamp", inplace=True)
+        df.reset_index(drop=True, inplace=True)
+
+    candles: list[dict] = []
+    for _, row in df.iterrows():
+        open_time = float(row.get("timestamp", 0.0))
+        candles.append({
+            "symbol": symbol,
+            "interval": "5m",
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row.get("volume", 0)),
+            "open_time": open_time,
+            "close_time": open_time + 300,  # 5 minutes
+        })
+
+    return candles
+
+
 def load_candles_from_db(
     db_path: str,
     symbol: str,
@@ -76,6 +128,9 @@ def load_candles_from_db(
         logger.error("Source DB not found: %s", db_path)
         return []
 
+    # Map symbol name to numeric ID used in the data-pipeline DB
+    symbol_id = SYMBOL_NAME_TO_ID.get(symbol, symbol)
+
     conn = sqlite3.connect(db_path, timeout=10)
     conn.row_factory = sqlite3.Row
 
@@ -88,7 +143,7 @@ def load_candles_from_db(
             "open_time, close_time "
             "FROM candles WHERE symbol = ? AND interval = ? AND open_time <= ? "
             "ORDER BY open_time DESC LIMIT ?",
-            (symbol, interval, end_ts, limit),
+            (symbol_id, interval, end_ts, limit),
         ).fetchall()
         conn.close()
         return [dict(r) for r in reversed(rows)]
@@ -99,7 +154,7 @@ def load_candles_from_db(
         "FROM candles WHERE symbol = ? AND interval = ? "
         "AND open_time >= ? AND open_time <= ? "
         "ORDER BY open_time LIMIT ?",
-        (symbol, interval, start_ts, end_ts, limit),
+        (symbol_id, interval, start_ts, end_ts, limit),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -154,13 +209,21 @@ class CandleMLPipeline:
     ) -> CandleDataset | None:
         """Run the pipeline for a single symbol."""
 
-        # Step 1: Load candles
-        logger.info("[1/5] Loading %s candles from %s",
-                     self._cfg.interval, self._cfg.data_pipeline_db)
-        candles = load_candles_from_db(
-            self._cfg.data_pipeline_db, symbol, self._cfg.interval,
-            start_ts, end_ts, limit,
-        )
+        # Step 1: Load candles (prefer Parquet, fallback to SQLite)
+        parquet_path = Path(self._cfg.parquet_dir) / f"{symbol}_5M.parquet"
+        candles: list[dict] = []
+
+        if parquet_path.exists():
+            logger.info("[1/5] Loading %s candles from Parquet: %s",
+                         self._cfg.interval, parquet_path)
+            candles = load_candles_from_parquet(str(parquet_path), symbol)
+        else:
+            logger.info("[1/5] Loading %s candles from SQLite: %s",
+                         self._cfg.interval, self._cfg.data_pipeline_db)
+            candles = load_candles_from_db(
+                self._cfg.data_pipeline_db, symbol, self._cfg.interval,
+                start_ts, end_ts, limit,
+            )
         if not candles:
             logger.warning("No candles found for %s - skipping", symbol)
             return None
@@ -267,6 +330,10 @@ Examples:
         help="Path to data-pipeline's market_data.db",
     )
     parser.add_argument(
+        "--source-parquet-dir", type=str, default="",
+        help="Directory containing {SYMBOL}_5M.parquet files (overrides default)",
+    )
+    parser.add_argument(
         "--output-db", type=str, default="",
         help="Path for candle ML output DB",
     )
@@ -289,6 +356,8 @@ Examples:
     cfg = CandleMLConfig()
     cfg.interval = args.interval
 
+    if args.source_parquet_dir:
+        cfg.parquet_dir = args.source_parquet_dir
     if args.source_db:
         cfg.data_pipeline_db = args.source_db
     if args.output_db:
