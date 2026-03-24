@@ -1,3 +1,7 @@
 xgboost
 lightgbm
 optuna
+numpy
+scikit-learn
+joblib
+matplotlib
