@@ -265,22 +265,36 @@ class FIXConnector:
             return seq
 
     def build_message(self, msg_type: bytes) -> simplefix.FixMessage:
+        """Build a FIX message with header fields. Body fields added by caller.
+        Tag 34 (MsgSeqNum) is inserted by send_message in correct header order."""
         msg = simplefix.FixMessage()
         msg.append_pair(8, FIX_VERSION)
         msg.append_pair(35, msg_type)
-        msg.append_pair(49, self.sender_comp_id.encode())
-        msg.append_pair(56, self.target_comp_id.encode())
-        msg.append_pair(50, self.sender_sub_id.encode())
-        msg.append_pair(
-            52,
-            datetime.now(timezone.utc).strftime("%Y%m%d-%H:%M:%S.%f")[:-3].encode(),
-        )
         return msg
 
     def send_message(self, msg: simplefix.FixMessage):
         seq = self._next_send_seq()
-        msg.append_pair(34, str(seq).encode())
-        raw = msg.encode()
+
+        # Rebuild with correct FIX 4.4 header order: 8, 9, 35, 34, 49, 56, 50, 52
+        ordered = simplefix.FixMessage()
+        ordered.append_pair(8, FIX_VERSION)
+        ordered.append_pair(35, msg.get(35))
+        ordered.append_pair(34, str(seq).encode())
+        ordered.append_pair(49, self.sender_comp_id.encode())
+        ordered.append_pair(56, self.target_comp_id.encode())
+        ordered.append_pair(50, self.sender_sub_id.encode())
+        ordered.append_pair(
+            52,
+            datetime.now(timezone.utc).strftime("%Y%m%d-%H:%M:%S.%f")[:-3].encode(),
+        )
+
+        # Copy body fields (skip header tags already added)
+        _header_tags = {8, 9, 10, 35, 34, 49, 56, 50, 52}
+        for tag, value in msg.pairs:
+            if int(tag) not in _header_tags:
+                ordered.append_pair(tag, value)
+
+        raw = ordered.encode()
 
         if len(raw) > MAX_MESSAGE_SIZE:
             raise ValueError(f"Message too large: {len(raw)} bytes (max {MAX_MESSAGE_SIZE})")
@@ -293,7 +307,7 @@ class FIXConnector:
                 self._last_send_time = time.monotonic()
                 self.health.last_send_time = time.time()
                 self.health.messages_sent += 1
-                msg_type = _get_field(msg, 35)
+                msg_type = _get_field(ordered, 35)
                 logger.debug("SENT [%s] seq=%d", msg_type, seq)
             except Exception as e:
                 logger.error("Send failed: %s", e)
