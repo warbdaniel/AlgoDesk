@@ -1,0 +1,136 @@
+# ═══════════════════════════════════════════════════════════
+#  ADAM 5M TRADING SYSTEM — Master Rule Configuration
+#  All rules are executed LOCAL on server. Zero AI cost.
+# ═══════════════════════════════════════════════════════════
+#
+#  Architecture:
+#    adam_trader.py  → scans 5m candles, classifies regime,
+#                      generates signals, manages positions
+#    local_decision_engine.py → validates signals against
+#                               risk/regime/exposure rules
+#    data-pipeline (5300) → provides features & candles
+#    fix-api (5200) → executes orders via FIX protocol
+#    regime-detector (5000) → multi-layer regime consensus
+#    dashboard (5100) → trade logging & analytics
+#
+#  TOKEN COST: $0.00 per trade decision
+# ═══════════════════════════════════════════════════════════
+
+version: "2.0"
+last_updated: "2025-03-25"
+
+# ── Regime Classification (local from indicators) ────────
+regime:
+  strong_trend:
+    adx_min: 32.0
+    di_spread_min: 10.0         # |+DI - -DI| must show clear directional dominance
+    adx_slope_min: 0.0          # ADX must be flat or rising (not decaying)
+    description: "High ADX + strong directional bias - ONLY tradeable regime"
+  mild_trend:
+    adx_min: 22.0
+    di_spread_min: 5.0
+    description: "Moderate ADX - DO NOT TRADE (filter out)"
+  choppy:
+    adx_max: 18.0
+    di_spread_max: 5.0
+    description: "Low ADX, no direction = DO NOT TRADE"
+  ranging:
+    description: "Everything else -- DO NOT TRADE"
+
+# ── Entry Rules ──────────────────────────────────────────
+entry:
+  # Core edge: ONLY trade STRONG_TREND
+  allowed_regimes: ["STRONG_TREND"]
+  
+  # Direction confirmation (need 3/4 true)
+  trend_signals:
+    - "+DI > −DI (or vice versa for short)"
+    - "EMA12 > EMA26 (or vice versa)"
+    - "SMA20 > SMA50 (or vice versa)"
+    - "MACD histogram > 0 (or < 0)"
+  min_confirming: 3
+  
+  # MACD momentum: histogram must be growing
+  macd_confirm: true
+  
+  # RSI filters (avoid overbought/oversold entries)
+  rsi_long_range: [35.0, 72.0]
+  rsi_short_range: [28.0, 65.0]
+  
+  # Bollinger position: don't buy at top / sell at bottom
+  bb_long_max: 1.1     # don't buy above upper BB
+  bb_short_min: -0.1   # don't sell below lower BB
+  
+  # Momentum: 5-candle return must align with direction
+  momentum_threshold: 0.0005
+  
+  # Spread check
+  max_spread_pips: 3.0
+
+# ── Position Sizing ──────────────────────────────────────
+sizing:
+  base_risk_pct: 2.0       # % of equity risked per trade
+  max_risk_pct: 4.0        # scale up above equity threshold
+  equity_scale_above: 500  # £ — start scaling risk above this
+  min_lot: 0.01
+  max_lot: 0.03            # conservative for small account
+  max_open_positions: 2
+  
+  # Dynamic lot cap formula:
+  #   lots = risk_amount / (stop_pips × pip_value_per_lot)
+  #   dynamic_max = min(MAX_LOT, equity / 500)
+
+# ── Stop / Take-Profit / Trail ───────────────────────────
+stops:
+  sl_atr_mult: 2.0         # SL = 2× ATR from entry
+  tp_atr_mult: 3.0         # TP = 3× ATR (1.5:1 R:R)
+  trail_atr_mult: 1.5      # trail at 1.5× ATR once activated
+  trail_activate_atr: 1.0  # activate trail after 1× ATR profit
+
+# ── Risk Management ──────────────────────────────────────
+risk:
+  daily_loss_circuit_breaker_pct: 5.0   # % of equity
+  max_daily_drawdown_pct: 1.5           # reduce-then-stop
+  hard_stop_dd_pct: 2.0                 # EMERGENCY stop all
+  max_correlation_exposure_pct: 60.0    # same-direction cap
+  max_spread_atr_ratio: 0.10            # skip if > 10% ATR
+
+# ── Timing ───────────────────────────────────────────────
+timing:
+  scan_interval_sec: 60     # check every 60s
+  candle_stale_sec: 600     # reject data > 10min old
+  min_candles: 50           # need 50+ for reliable indicators
+  market_hours:
+    open: "Sun 22:00 UTC"
+    close: "Fri 22:00 UTC"
+
+# ── Symbols ──────────────────────────────────────────────
+symbols:
+  "1":  {name: EURUSD, pip: 0.0001, pip_value: 10.0}
+  "2":  {name: GBPUSD, pip: 0.0001, pip_value: 10.0}
+  "4":  {name: USDCHF, pip: 0.0001, pip_value: 10.0}
+  "5":  {name: AUDUSD, pip: 0.0001, pip_value: 10.0}
+  "6":  {name: USDCAD, pip: 0.0001, pip_value: 7.0}
+  "7":  {name: NZDUSD, pip: 0.0001, pip_value: 10.0}
+
+# ── Performance Tracking ────────────────────────────────
+# Historical edge (from backtest):
+#   STRONG_TREND: 6/6 wins = +£229
+#   Other regimes: 6/6 losses = -£39.50
+#   → Expected value per STRONG_TREND trade: ~+£38.17
+#   → Expected value per other trade: ~-£6.58
+#   → Conclusion: ONLY trade STRONG_TREND
+
+# ── When to involve Claude (Sonnet) ─────────────────────
+# These are the ONLY scenarios that should use API tokens:
+ai_usage:
+  allowed:
+    - "Manual analysis via web UI (user-initiated)"
+    - "Weekly strategy review (scheduled, low frequency)"
+    - "Post-mortem analysis of losing streaks"
+    - "New feature development / code changes"
+  NOT_allowed:
+    - "Per-trade decisions (use local_decision_engine.py)"
+    - "Regime classification (use adam_trader classify_regime())"
+    - "Position management (use adam_trader manage_positions())"
+    - "Risk checks (use local rules)"

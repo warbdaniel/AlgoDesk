@@ -66,6 +66,10 @@ services:
       required: true
     - name: "sshd"
       required: true
+    - name: "regime-detector"
+      required: true
+      health_endpoint: "http://localhost:5000/health"
+      systemd_service: "regime-detector.service"
 
 # --- Network Security ---
 network:
