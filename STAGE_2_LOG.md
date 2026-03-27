@@ -1241,3 +1241,23 @@ Created `orchestrator/champion_loader.py` — a parameter promotion pipeline tha
 7. Guardian failsafe cascade (C3)
 8. Paper trading phase (D1)
 
+
+## 16.6 Preparing Full System Walkthrough Test
+**Date:** 2026-03-27 12:15 UTC
+**Status:** PLANNING — Next session will execute
+
+### Data Inventory for Walkthrough
+- 5m candles: 30 symbols, 2024-01-01 to 2026-03-22 (~2.25 years)
+- Primary assets: XAUUSD (226K bars), EURJPY (226K bars), USDCAD (218K bars)
+- H4 candles: Available for regime detection context
+- All data in parquet format at /opt/trading-desk/data/historical/
+
+### Test Plan
+- Full time-based multi-asset simultaneous walkthrough
+- 5-minute bar-by-bar simulation across all 3 primary assets simultaneously
+- Split into quarterly reports (Q1-Q4 2024, Q1-Q4 2025, Q1 2026)
+- Track: monthly P&L, max drawdown, trade frequency, circuit breaker events, regime changes
+
+### Optimizer Note
+- PID 1267112 still running — may need to suspend during walkthrough to free resources
+
