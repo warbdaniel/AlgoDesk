@@ -1117,3 +1117,33 @@ Phase 3 — Continuous Improvement (runs parallel with live):
 - Remaining issue: network(unexpected_ports) WARNING — separate concern
 - Optimizer PID 1267112 still running, not affected ✓
 
+
+## 16.2 Phase 1, Item 2: Guardian Backup & Recovery System (C4)
+**Date:** 2026-03-27 10:50 UTC
+**Status:** COMPLETE ✓
+
+### Components Built
+
+1. **guardian-backup.sh** — Automated GitHub backup script
+   - Lock-file protected against concurrent runs
+   - Auto-detects changed components for commit messages
+   - Tracks critical files: champion params, Guardian config/state, orchestrator, regime-detector, docs
+   - Supports --force and --message flags for on-demand use
+   - Log rotation at 10MB
+   
+2. **guardian-recovery.sh** — Full server recovery from GitHub
+   - Three modes: --full, --config-only, --verify-only
+   - 6-step restore: system packages → venv → config/params → services → health → trading gate
+   - Pre-recovery backups of current state
+   - Color-coded PASS/FAIL/WARN output
+   - Trading gate: only clears for trading when all checks pass
+   
+3. **Cron job** — Hourly automated backups
+   - `0 * * * *` runs guardian-backup.sh
+   - Logs to /opt/trading-desk/logs/system/guardian_backup_cron.log
+
+### First Backup
+- 13 files, 74,162 insertions pushed to GitHub
+- Commit: 9b0776d on main branch
+- Includes: champion params (XAUUSD, EURJPY, USDCAD), Guardian config, orchestrator, regime-detector, docs
+
