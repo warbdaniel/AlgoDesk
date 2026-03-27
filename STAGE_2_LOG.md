@@ -1147,3 +1147,97 @@ Phase 3 — Continuous Improvement (runs parallel with live):
 - Commit: 9b0776d on main branch
 - Includes: champion params (XAUUSD, EURJPY, USDCAD), Guardian config, orchestrator, regime-detector, docs
 
+
+## 16.3 Phase 1, Item 3: Core Execution Engine — Champion Parameter Wiring (A1)
+**Date:** 2026-03-27 11:11 UTC
+**Status:** COMPLETE ✓
+
+### What Was Done
+Created `orchestrator/champion_loader.py` — a parameter promotion pipeline that:
+- Reads champion_*.json from continuous_optimizer_results/
+- Validates parameter schema (12 required keys checked)
+- Inserts into orchestrator DB (optimized_params table) with regime="ALL"
+- Supports --dry-run and --force modes
+- Includes verification step reading back from DB
+
+### Champion Parameters Loaded
+| Asset  | Params | OOS Sharpe | OOS PF | Win Rate | Max DD  | Trades |
+|--------|--------|------------|--------|----------|---------|--------|
+| XAUUSD | 26     | 10.5907    | 3.366  | 0.6471   | 8.65%   | 136    |
+| EURJPY | 23     | 8.4957     | 2.514  | 0.7345   | 8.39%   | 113    |
+| USDCAD | 28     | 12.5767    | 3.268  | 0.6364   | 5.11%   | 66     |
+
+### How It Works
+1. Champion JSON files → champion_loader.py → orchestrator DB (optimized_params)
+2. Strategy engine calls db.get_optimized_params() → gets champion params
+3. StrategyEngine.get_params(symbol, regime) → returns params for signal generation
+4. Regime gating handled at trade time by regime-detector API
+
+### Files
+- Created: /opt/trading-desk/orchestrator/champion_loader.py
+- Modified: orchestrator DB (data/orchestrator.db) — 3 new rows in optimized_params
+
+
+## 16.4 Phase 1, Item 4: Guardian Trading Account Protection (C1)
+**Date:** 2026-03-27 11:30 UTC
+**Status:** COMPLETE ✓
+
+### Components Built
+
+1. **circuit_breaker.py** — Tiered equity protection system
+   - 5-tier circuit breaker (NORMAL → CAUTION → WARNING → CRITICAL → EMERGENCY)
+   - Drawdown thresholds: 0%/5%/10%/15%/25% with matching position size multipliers
+   - Daily loss limit: 5% → halt new trades for the day
+   - Per-symbol position limit: 1 position per symbol
+   - Consecutive loss tracking: 5 losses → 1 hour pause
+   - Max total open positions: 10
+   - Hard kill switch at 40% drawdown (absolute protection)
+   - Persistent state file (survives restarts)
+   - Tier change callback system for Guardian alerts
+
+2. **Risk Manager Integration**
+   - Circuit breaker equity updates in check_risk() cycle
+   - Position size multiplier applied in calculate_position_size()
+   - can_open_trade() now checks circuit breaker before allowing new trades
+   - Circuit breaker status included in risk check return data
+
+### Tier Response Matrix
+| Tier | Name      | DD Threshold | Size Mult | Can Trade | Action           |
+|------|-----------|-------------|-----------|-----------|------------------|
+| 0    | NORMAL    | <5%         | 1.00      | Yes       | Normal operation |
+| 1    | CAUTION   | ≥5%         | 0.75      | Yes       | Reduce sizing    |
+| 2    | WARNING   | ≥10%        | 0.50      | Yes       | Reduce + alert   |
+| 3    | CRITICAL  | ≥15%        | 0.00      | No        | Halt new trades  |
+| 4    | EMERGENCY | ≥25%        | 0.00      | No        | Close all        |
+
+### Files
+- Created: /opt/trading-desk/orchestrator/circuit_breaker.py
+- Modified: /opt/trading-desk/orchestrator/risk_manager.py (circuit breaker integration)
+- State: /opt/trading-desk/guardian/circuit_breaker_state.json
+
+
+## 16.5 Phase 1 Summary — Pre-Live Foundation
+**Date:** 2026-03-27 11:30 UTC
+**Status:** ALL ITEMS COMPLETE ✓
+
+| # | Item | Workstream | Status |
+|---|------|-----------|--------|
+| 1 | Fix regime-detector service | C (Guardian) | ✓ Complete — systemd service, auto-restart |
+| 2 | Backup/recovery system | C4 | ✓ Complete — GitHub backup + recovery scripts |
+| 3 | Champion parameter wiring | A1 | ✓ Complete — 3 assets loaded to orchestrator DB |
+| 4 | Circuit breakers & equity protection | C1 | ✓ Complete — 5-tier tiered protection |
+
+### System State After Phase 1
+- Guardian health: DEGRADED (from CRITICAL — only network warning remains)
+- Regime-detector: UP on port 5000, systemd managed, auto-restart
+- Optimizer: Still running (PID 1267112, not affected)
+- Git: All changes backed up to GitHub, hourly cron active
+- Champion params: XAUUSD/EURJPY/USDCAD loaded in orchestrator DB
+- Circuit breaker: Tier 0 (NORMAL), ready for live operation
+
+### Next: Phase 2 — Forward Test Launch
+5. Signal pipeline (A2)
+6. Portfolio risk management (A3)
+7. Guardian failsafe cascade (C3)
+8. Paper trading phase (D1)
+

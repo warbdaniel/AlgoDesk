@@ -13,6 +13,7 @@ import requests
 import numpy as np
 from pathlib import Path
 from datetime import datetime, timezone
+from circuit_breaker import circuit_breaker
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
@@ -108,9 +109,14 @@ class RiskManager:
             daily_exceeded = True
             logger.warning(f"Daily loss limit hit: {self.daily_pnl:.2%}")
 
+        # --- Circuit Breaker Integration (C1) ---
+        cb_status = circuit_breaker.update_equity(equity, balance)
+        circuit_breaker.check_daily_limit(self.daily_pnl * equity, equity)
+        cb_can_trade = cb_status.get("can_trade", True)
+        
         return {
-            "status": "ok" if not daily_exceeded else "daily_limit",
-            "can_trade": not daily_exceeded and not self.kill_switch_active,
+            "status": "ok" if not daily_exceeded and cb_can_trade else cb_status.get("status", "daily_limit"),
+            "can_trade": not daily_exceeded and not self.kill_switch_active and cb_can_trade,
             "equity": equity,
             "balance": balance,
             "peak_equity": self.peak_equity,
@@ -119,6 +125,7 @@ class RiskManager:
             "daily_limit_remaining": round(DAILY_LOSS_LIMIT + self.daily_pnl, 4),
             "kill_switch_active": self.kill_switch_active,
             "open_positions": open_positions,
+            "circuit_breaker": cb_status,
         }
 
     def calculate_position_size(self, symbol: str, entry_price: float,
@@ -180,6 +187,11 @@ class RiskManager:
         lots = max(MIN_LOT_SIZE, min(lots, MAX_LOT_SIZE))
         lots = round(lots, 2)
 
+        # Apply circuit breaker size multiplier (C1)
+        cb_mult = circuit_breaker.get_position_size_multiplier()
+        if cb_mult < 1.0:
+            logger.info(f"Circuit breaker reducing size: lots={lots} * cb_mult={cb_mult:.2f}")
+            lots = round(lots * cb_mult, 2)
         return lots
 
     def _correlation_factor(self, symbol: str) -> float:
@@ -209,6 +221,12 @@ class RiskManager:
         """Check if we can open a new trade. Returns (bool, reason)."""
         if self.kill_switch_active:
             return False, "kill_switch_active"
+
+        # Circuit breaker position check (C1)
+        open_trades = db.get_open_trades()
+        cb_ok, cb_reason = circuit_breaker.can_open_position(symbol, open_trades)
+        if not cb_ok:
+            return False, f"circuit_breaker: {cb_reason}"
 
         risk = self.check_risk()
         if not risk.get("can_trade", False):
