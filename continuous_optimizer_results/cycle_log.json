@@ -85027,5 +85027,74 @@
       "ev_per_trade": 1.501374,
       "strong_trend_bars": 14224
     }
+  },
+  {
+    "cycle": 144,
+    "symbol": "AUDUSD",
+    "timestamp": "2026-03-27T13:37:43.584028",
+    "elapsed_hours": 12.254622003055555,
+    "in_sample": {
+      "trades": 223,
+      "sharpe": 5.5194,
+      "profit_factor": 2.9929,
+      "win_rate": 0.583,
+      "max_drawdown": 0.0969,
+      "monthly_ev": 945.0732287
+    },
+    "params": {
+      "adx_strong_threshold": 44.913032657513554,
+      "adx_mild_threshold": 14.009742351696381,
+      "mild_trend_entry_mult": 0.9245340126525751,
+      "ranging_entry_mult": 0.641251358675431,
+      "trade_mild_trend": false,
+      "trade_ranging": false,
+      "rsi_long_min": 50,
+      "rsi_long_max": 77,
+      "rsi_short_min": 45,
+      "rsi_short_max": 63,
+      "adx_min": 30.004756757796258,
+      "di_spread_min": 13.64285870510064,
+      "entry_threshold": 0.8717505190419645,
+      "lookback": 9,
+      "atr_sl_mult": 2.526454911602719,
+      "atr_tp_mult": 7.262877874150755,
+      "trail_activation_atr": 2.595889405494322,
+      "trail_distance_atr": 0.47583820853162906,
+      "use_macd_filter": false,
+      "use_stoch_filter": true,
+      "stoch_ob": 87,
+      "stoch_os": 12,
+      "use_bb_filter": false,
+      "use_volume_filter": false,
+      "use_time_filter": true
+    },
+    "score": 573.3613488910537,
+    "trials_run": 50,
+    "total_study_trials": 7862,
+    "cycle_time_seconds": 2331.6591382026672,
+    "validation": {
+      "total_trades": 44,
+      "sharpe": 15.1999,
+      "profit_factor": 3.6718,
+      "win_rate": 0.5682,
+      "max_drawdown": 0.0769,
+      "monthly_return_pct": 248.686,
+      "monthly_ev": 248.686,
+      "trades_per_month": 53.99,
+      "ev_per_trade": 4.605921,
+      "strong_trend_bars": 2063
+    },
+    "oos_test": {
+      "total_trades": 64,
+      "sharpe": 13.4974,
+      "profit_factor": 3.1639,
+      "win_rate": 0.5938,
+      "max_drawdown": 0.0902,
+      "monthly_return_pct": 226.0659,
+      "monthly_ev": 226.0659,
+      "trades_per_month": 66.29,
+      "ev_per_trade": 3.410161,
+      "strong_trend_bars": 2444
+    }
   }
 ]

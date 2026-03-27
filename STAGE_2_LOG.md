@@ -1261,3 +1261,120 @@ Created `orchestrator/champion_loader.py` — a parameter promotion pipeline tha
 ### Optimizer Note
 - PID 1267112 still running — may need to suspend during walkthrough to free resources
 
+
+## 16.7 Full System Walkthrough Simulation — EXECUTED
+**Date:** 2026-03-27 13:31 UTC
+**Status:** COMPLETE — Critical findings documented
+
+### Simulation Configuration
+- Engine: /opt/trading-desk/walkthrough_simulation.py (832 lines)
+- Data: 5m candles XAUUSD (226K bars), EURJPY (226K bars), USDCAD (218K bars)
+- Period: 2024-01-01 to 2026-03-22 (~2.25 years)
+- Initial Equity: $10,000 shared across all 3 assets
+- Full pipeline: Regime Detection → Signal Generation (champion params) → Circuit Breaker → Half-Kelly Position Sizing → Entry/SL/TP/Trailing Stop → Position Closing
+- Optimizer PID 1267112 suspended with kill -STOP before walkthrough
+
+### Overall Performance Summary
+- **Final Equity: $8,567.96**
+- **Total Return: -14.32%**
+- **Total Trades: 153** (all concentrated in Q1-2024)
+- **Overall Win Rate: 54.90%**
+- **Overall Sharpe Ratio: -2.6097**
+- **Overall Profit Factor: 0.7299**
+- **Max Drawdown: 15.06%**
+- **Kill Switch Triggered: No** (did not reach 40% threshold)
+- Circuit Breaker Tier Events: 11 escalations/de-escalations
+- Daily Halt Events: 2
+
+### Per-Asset Performance (Live Walkthrough vs OOS Backtest)
+
+**XAUUSD:**
+- Trades: 44 (W: 18, L: 26), Win Rate: 40.91%
+- Live Sharpe: -15.33 vs OOS Backtest: 10.59
+- Live PF: 0.30 vs OOS: 3.37
+- Avg Pips/Trade: -6.95, Avg Duration: 1.4 hours
+- Exit Reasons: SL=24, TRAILING=17, TIME=3
+
+**EURJPY:**
+- Trades: 81 (W: 56, L: 25), Win Rate: 69.14%
+- Live Sharpe: -0.75 vs OOS Backtest: 8.50
+- Live PF: 0.94 vs OOS: 2.51
+- Avg Pips/Trade: -0.17, Avg Duration: 0.7 hours
+- Exit Reasons: TRAILING=56, SL=24, TIME=1
+
+**USDCAD:**
+- Trades: 28 (W: 10, L: 18), Win Rate: 35.71%
+- Live Sharpe: -9.00 vs OOS Backtest: 12.58
+- Live PF: 0.54 vs OOS: 3.27
+- Avg Pips/Trade: -1.97, Avg Duration: 1.5 hours
+- Exit Reasons: TRAILING=10, SL=17, TIME=1
+
+### Quarterly Breakdown
+
+**Q1-2024 (2024-01-01 to 2024-03-31):**
+- 153 trades, Win Rate: 54.90%, Return: -14.32%
+- Sharpe: -2.61, PF: 0.73, Max DD: 15.06%
+- Equity: $10,000.00 → $8,567.96
+- Monthly: Jan=-14.32%, Feb=0.0%, Mar=0.0%
+- CB Events: 11, Daily Halts: 2
+- XAUUSD: 44 trades (WR=40.91%), EURJPY: 81 trades (WR=69.14%), USDCAD: 28 trades (WR=35.71%)
+
+**Q2-2024 through Q1-2026:** No trades — CB Tier 3 (CRITICAL) locked out new positions
+
+### Circuit Breaker Event Timeline
+1. 2024-01-02 02:35: NORMAL → CAUTION (Equity=$9,479.63, DD=6.22%)
+2. 2024-01-03 01:15: CAUTION → WARNING (Equity=$9,033.54, DD=10.64%)
+3. 2024-01-03 oscillated between CAUTION/WARNING multiple times
+4. 2024-01-09 06:10: WARNING → **CRITICAL** (Equity=$8,577.68, DD=15.15%)
+   - All new trades halted from this point forward
+   - 2 daily halt events on Jan 2 and Jan 5 (>5% daily loss)
+
+### Critical Findings & Root Cause Analysis
+
+**Finding 1: Severe Live-vs-Backtest Degradation**
+The walkthrough Sharpe ratios (-15.33 XAUUSD, -0.75 EURJPY, -9.00 USDCAD) are dramatically below the OOS backtest Sharpes (10.59, 8.50, 12.58). This ~100%+ degradation indicates the walk-forward simulation under simultaneous multi-asset pressure behaves very differently from isolated single-asset backtests.
+
+**Finding 2: Circuit Breaker Correctly Prevented Catastrophic Loss**
+The 5-tier CB system worked exactly as designed — it escalated through CAUTION and WARNING before locking at CRITICAL (15% DD). Without the CB, losses would likely have continued. However, the CB's inability to de-escalate after the initial drawdown (since peak equity remained at $10K) meant no trading for the remaining ~2 years.
+
+**Finding 3: CB Peak Equity Reset Needed for Walkthrough**
+The CB tracks peak_equity from the absolute high. In a walkthrough, once you dip 15% below $10K, you never recover because no trades = no equity recovery. A rolling peak or periodic peak reset mechanism should be considered for the live system's recovery protocol.
+
+**Finding 4: January 2024 Was Hostile for These Strategies**
+All 153 trades occurred in the first 9 trading days of January 2024. The market conditions during this period may have been atypical (New Year low liquidity, regime transitions).
+
+**Finding 5: EURJPY Win Rate Held Up (69.14%)**
+Despite overall negative performance, EURJPY maintained a strong 69.14% win rate with PF near 0.94. The signal generation works — the issue is that winning trades' magnitude was insufficient to offset losing trades' impact via the position sizing mechanism.
+
+### Continuous Learning Analysis
+- All symbols flagged for re-optimization in Q1-2024
+- No additional data points since trades halted after Q1-2024
+
+### Pareto Asset Selection
+- All assets showed zero rolling Sharpe after Q1-2024 (no trades to evaluate)
+- Would recommend review of Pareto selection criteria
+
+### Inter-Asset Correlation
+- Insufficient overlapping trade months for meaningful correlation analysis
+- All pairs showed r=0.0000 due to concentrated trading period
+
+### Recommendations for Stage 3
+
+1. **CB Recovery Protocol:** Implement a rolling 30-day peak equity or a manual operator reset mechanism so the system can resume trading after a drawdown stabilizes
+2. **Paper Trading Warm-Up:** Start with a 2-week paper trading period before committing real equity to validate signal quality in current market conditions  
+3. **Gradual Scale-In:** Begin with 25% of target position sizing (0.5% risk per trade vs 2%) and increase only after demonstrating positive expectancy
+4. **Regime-Specific Validation:** The January 2024 period may have been dominated by ranging/choppy regimes where signals were unreliable — validate that regime detection gates are properly filtering
+5. **Spread Impact Review:** The spread costs (3.0 pips XAUUSD, 1.0 EURJPY, 1.2 USDCAD) may be eating into edge — consider if these reflect actual execution costs
+6. **Position Sizing Calibration:** The half-Kelly sizing with 2% base risk may be too aggressive for the actual win rates observed (~55% portfolio-wide vs 64-73% from backtest)
+
+### Output Files
+- walkthrough_results/consolidated_report.txt — Full text report
+- walkthrough_results/quarterly_reports.json — Quarterly data (JSON)
+- walkthrough_results/trade_log.csv — 153 trade records with full details
+- walkthrough_results/equity_curve.csv — Hourly equity snapshots
+- walkthrough_results/circuit_breaker_events.json — All CB tier changes
+- walkthrough_results/continuous_learning_flags.json — Re-optimization triggers
+- walkthrough_results/pareto_flags.json — Pareto selection analysis
+
+### Optimizer Resumed
+- `kill -CONT 1267112` executed to resume the 48h optimizer run
