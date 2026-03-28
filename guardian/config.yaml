@@ -141,3 +141,23 @@ alerting:
   rate_limit: 60              # min seconds between same alert
   daily_summary: true
   summary_hour: 8             # 8 AM UTC
+
+# --- AI Monitor (Claude Code Integration) ---
+ai_monitor:
+  enabled: true
+  script: /opt/trading-desk/guardian/guardian-ai-monitor.sh
+  # Frequency: every 5 minutes for routine, auto-detects when deeper analysis needed
+  routine_interval: 300       # 5 min routine health checks
+  deep_analysis_interval: 3600  # Hourly deep analysis when conditions trigger
+  # Scheduled deep analyses (UTC hours)
+  scheduled_analyses:
+    - hour: 8
+      mode: MORNING_BRIEFING
+    - hour: 12
+      mode: MIDDAY_CHECK
+    - hour: 17
+      mode: AFTERNOON_REVIEW
+    - hour: 21
+      mode: END_OF_DAY_DEEP_ANALYSIS
+  log_dir: /opt/trading-desk/logs/guardian/ai-monitor
+  max_analysis_age_days: 30   # Auto-cleanup old analyses
