@@ -35,16 +35,7 @@ resources:
 
 # --- Services to Monitor ---
 services:
-  docker_containers:
-    - name: n8n
-      restart_on_failure: true
-      max_restarts: 3
-      restart_cooldown: 300   # seconds between restart attempts
-
   ports:
-    - port: 5678
-      name: "n8n webhook"
-      protocol: tcp
     - port: 5000
       name: "regime-detector API"
       protocol: tcp
@@ -74,7 +65,7 @@ services:
 # --- Network Security ---
 network:
   # Ports that SHOULD be listening (allowlist)
-  expected_listening_ports: [22, 53, 5000, 5100, 5200, 5300, 5500, 5600, 5678, 8812, 9000, 9001, 9009]
+  expected_listening_ports: [22, 53, 5000, 5100, 5200, 5300, 5500, 5600, 8812, 9000, 9001, 9009]
   # Alert on unexpected outbound connections
   monitor_outbound: true
   # Max connections before warning
